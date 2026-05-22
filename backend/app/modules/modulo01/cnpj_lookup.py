@@ -32,18 +32,25 @@ class LookupError(Exception):
 
 
 def validar_cnpj(cnpj: str) -> bool:
-    """Valida um CNPJ pelos dígitos verificadores (rejeita entrada manual errada)."""
-    c = re.sub(r"\D", "", cnpj or "")
+    """Valida o CNPJ pelos dígitos verificadores.
+
+    Aceita o formato numérico tradicional e o alfanumérico (Receita Federal a partir
+    de 2026): os 12 primeiros caracteres podem ser 0-9/A-Z e os 2 DVs são numéricos.
+    O cálculo usa o valor ASCII menos 48 de cada caractere (compatível com ambos).
+    """
+    c = re.sub(r"[^0-9A-Za-z]", "", cnpj or "").upper()
     if len(c) != 14 or len(set(c)) == 1:
+        return False
+    if not c[12:].isdigit():  # os dois dígitos verificadores são sempre numéricos
         return False
 
     def _dv(base: str, pesos: list[int]) -> str:
-        soma = sum(int(d) * p for d, p in zip(base, pesos))
+        soma = sum((ord(ch) - 48) * p for ch, p in zip(base, pesos))
         resto = soma % 11
         return "0" if resto < 2 else str(11 - resto)
 
     dv1 = _dv(c[:12], [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
-    dv2 = _dv(c[:13], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    dv2 = _dv(c[:12] + dv1, [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
     return c[12] == dv1 and c[13] == dv2
 
 
@@ -65,10 +72,12 @@ def melhor_match(nome_alvo: str, records: list[dict]) -> dict:
     - várias empresas distintas: ambíguo (não confirmado).
     """
     alvo = _normalizar(nome_alvo)
-    matrizes = [r for r in records if r.get("head")] or records
+    # Considera só records com taxId (evita KeyError em retorno inesperado da API).
+    candidatos = [r for r in records if r.get("taxId")]
+    matrizes = [r for r in candidatos if r.get("head")] or candidatos
 
     exatos = [r for r in matrizes if _normalizar(r.get("company", {}).get("name", "")) == alvo]
-    raizes = {r["taxId"][:8] for r in matrizes if r.get("taxId")}
+    raizes = {r["taxId"][:8] for r in matrizes}
 
     if len(exatos) == 1:
         r = exatos[0]

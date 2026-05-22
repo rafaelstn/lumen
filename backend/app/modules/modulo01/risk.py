@@ -27,12 +27,15 @@ def aplicar_risco(fornecedores: list[dict]) -> None:
         status = f.get("status_cnd")
         impacto = _impacto_anual(f.get("total_compras"), f.get("aliquota_max"))
 
-        if grupo in ("A", "B") and status in (cnd.POSITIVA, cnd.POSITIVA_EFEITO_NEGATIVA):
+        # Risco restrito ao Grupo A (crédito pleno 12/18%): é onde a perda de crédito
+        # em 2027 é financeiramente relevante. Grupo B (crédito simbólico <10%) e C
+        # (sem crédito) não entram no alerta.
+        if grupo == "A" and status in (cnd.POSITIVA, cnd.POSITIVA_EFEITO_NEGATIVA):
             risco, motivo = ALTO, (
                 "Oferece crédito de ICMS hoje, mas possui débito ativo na Receita. "
                 "A partir de 2027, inadimplentes não poderão transferir crédito."
             )
-        elif grupo in ("A", "B") and status == cnd.FALHA:
+        elif grupo == "A" and status == cnd.FALHA:
             risco, motivo = MEDIO, "Não foi possível verificar a regularidade fiscal."
         else:
             risco, motivo = BAIXO, ""

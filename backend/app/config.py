@@ -9,6 +9,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://fiscal_user:fiscal_pass@postgres:5432/fiscal_db"
     cors_origins: str = "http://localhost:3000"
 
+    @field_validator("cors_origins")
+    @classmethod
+    def _rejeita_cors_curinga(cls, v: str) -> str:
+        # Dado fiscal confidencial: nunca liberar CORS para qualquer origem.
+        if "*" in v:
+            raise ValueError("CORS_ORIGINS não pode conter '*' (dado fiscal confidencial).")
+        return v
+
     @field_validator("database_url")
     @classmethod
     def _force_asyncpg_driver(cls, v: str) -> str:
@@ -37,6 +45,7 @@ class Settings(BaseSettings):
     cnpj_lookup_base_url: str = "https://api.cnpja.com"
     cnpj_lookup_api_key: str = ""
     cnpj_lookup_limite_padrao: int = 20  # teto de fornecedores por chamada (controle de créditos)
+    cnpj_lookup_limite_max: int = 200  # clamp do parâmetro 'limite' (anti-abuso)
 
     # Consulta de CND (regularidade fiscal) via Infosimples. Token só via env.
     cnd_provider: str = "infosimples"
@@ -44,7 +53,12 @@ class Settings(BaseSettings):
     infosimples_token: str = ""
     infosimples_timeout: int = 120  # timeout da consulta na origem (Infosimples), em segundos
     cnd_limite_padrao: int = 20  # teto de fornecedores por chamada (controle de custo)
+    cnd_limite_max: int = 200  # clamp do parâmetro 'limite' (anti-abuso)
     cnd_concorrencia: int = 4  # consultas CND simultâneas
+
+    # Teto global diário de consultas pagas (blindagem de fatura, independe de IP).
+    cnd_max_diario: int = 300
+    cnpj_max_diario: int = 300
 
     jobs_dir: str = "/app/_jobs"
 

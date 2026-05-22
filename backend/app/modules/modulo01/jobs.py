@@ -3,12 +3,17 @@
 Em memória é suficiente para o Módulo 01 com réplica única. Aplica TTL e cap de
 quantidade para não crescer indefinidamente (DoS/OOM) nem reter dado fiscal além
 do necessário. A persistência em Postgres entra nos módulos futuros.
+
+Concorrência: `obter` devolve deep copy (isola leitores como /resultado e /progresso
+do estado que a task de CND está mutando); escritas usam `mutar`, um read-modify-write
+atômico sob lock. Assim leituras nunca veem estado parcial e escritas não se perdem.
 """
+import copy
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from app.config import settings
 
@@ -49,14 +54,30 @@ class JobStore:
         return job_id
 
     def obter(self, job_id: str) -> dict[str, Any] | None:
+        """Devolve uma cópia profunda do job (isola o leitor de escritas concorrentes)."""
         with self._lock:
             job = self._jobs.get(job_id)
-            return dict(job) if job is not None else None
+            return copy.deepcopy(job) if job is not None else None
 
-    def atualizar(self, job_id: str, **campos: Any) -> None:
+    def existe(self, job_id: str) -> bool:
+        with self._lock:
+            return job_id in self._jobs
+
+    def atualizar(self, job_id: str, **campos: Any) -> bool:
         with self._lock:
             if job_id in self._jobs:
                 self._jobs[job_id].update(campos)
+                return True
+            return False
+
+    def mutar(self, job_id: str, fn: Callable[[dict[str, Any]], Any]) -> bool:
+        """Read-modify-write atômico: aplica fn ao job real sob lock. Devolve False se sumiu."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return False
+            fn(job)
+            return True
 
 
 store = JobStore(ttl_seconds=settings.job_ttl_seconds, cap=settings.job_cap)

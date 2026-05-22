@@ -54,3 +54,10 @@ def test_validar_cnpj():
     assert cl.validar_cnpj("37335118000181") is False       # DV errado
     assert cl.validar_cnpj("11111111111111") is False       # todos iguais
     assert cl.validar_cnpj("123") is False                  # tamanho errado
+
+
+def test_validar_cnpj_alfanumerico():
+    # Formato alfanumérico (Receita 2026): 12 primeiros 0-9/A-Z, 2 DVs numéricos.
+    # Não deve quebrar com letras e deve exigir DV numérico.
+    assert isinstance(cl.validar_cnpj("12ABC34501DE35"), bool)  # não lança exceção
+    assert cl.validar_cnpj("12ABC34501DEAB") is False           # DV com letra é inválido

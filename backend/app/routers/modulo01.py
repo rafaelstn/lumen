@@ -13,7 +13,7 @@ import httpx
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 
 from app.config import settings
-from app.modules.modulo01 import cnd, cnpj_lookup, pdf_generator, service
+from app.modules.modulo01 import budget, cnd, cnpj_lookup, pdf_generator, risk, service
 from app.modules.modulo01.jobs import store
 from app.modules.modulo01.parser import ParserError
 from app.modules.modulo01.schemas import CnpjManualIn, ProcessarResponse
@@ -129,44 +129,59 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     job = store.obter(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    if budget.restante("cnpj") <= 0:
+        raise HTTPException(status_code=429, detail="Teto diário de buscas de CNPJ atingido.")
 
-    teto = limite or settings.cnpj_lookup_limite_padrao
-    fornecedores = job["fornecedores"]
-    pendentes = [f for f in fornecedores if not f.get("cnpj")][:teto]
+    teto = max(1, min(limite or settings.cnpj_lookup_limite_padrao, settings.cnpj_lookup_limite_max))
+    pendentes = [(f["cod_forn"], f["nome_forn"]) for f in job["fornecedores"] if not f.get("cnpj")][:teto]
 
     contagem = {"processados": 0, "confirmados": 0, "baixa_confianca": 0, "ambiguos": 0, "nao_encontrados": 0}
+    erros_pontuais = 0
     creditos_esgotados = False
+    teto_diario_atingido = False
+    achados: dict[str, tuple[str, bool]] = {}  # cod_forn -> (cnpj, confirmado)
 
     async with httpx.AsyncClient() as client:
-        for f in pendentes:
+        for cod_forn, nome in pendentes:
+            if not budget.consumir("cnpj"):
+                teto_diario_atingido = True
+                break
             try:
-                r = await cnpj_lookup.buscar_por_nome(f["nome_forn"], None, client)
+                r = await cnpj_lookup.buscar_por_nome(nome, None, client)
             except cnpj_lookup.LookupError as exc:
                 if "créditos" in str(exc) or "Limite" in str(exc):
                     creditos_esgotados = True
                     break
-                continue  # erro pontual: pula o fornecedor, segue os demais
+                erros_pontuais += 1
+                continue
             contagem["processados"] += 1
             conf = r["confianca"]
             if conf in (cnpj_lookup.CONF_ALTA, cnpj_lookup.CONF_BAIXA):
-                f["cnpj"] = r["cnpj"]
-                f["cnpj_pendente"] = False
-                f["cnpj_confirmado"] = conf == cnpj_lookup.CONF_ALTA
-                if conf == cnpj_lookup.CONF_ALTA:
-                    contagem["confirmados"] += 1
-                else:
-                    contagem["baixa_confianca"] += 1
+                achados[cod_forn] = (r["cnpj"], conf == cnpj_lookup.CONF_ALTA)
+                contagem["confirmados" if conf == cnpj_lookup.CONF_ALTA else "baixa_confianca"] += 1
             elif conf == cnpj_lookup.CONF_AMBIGUO:
                 contagem["ambiguos"] += 1
             else:
                 contagem["nao_encontrados"] += 1
 
-    store.atualizar(job_id, fornecedores=fornecedores)
+    def _aplicar(job: dict) -> None:
+        for f in job["fornecedores"]:
+            if f["cod_forn"] in achados:
+                cnpj, confirmado = achados[f["cod_forn"]]
+                f["cnpj"] = cnpj
+                f["cnpj_pendente"] = False
+                f["cnpj_confirmado"] = confirmado
+
+    store.mutar(job_id, _aplicar)
+    atual = store.obter(job_id)
+    pendentes_restantes = sum(1 for f in atual["fornecedores"] if not f.get("cnpj")) if atual else 0
     return {
         "job_id": job_id,
         **contagem,
+        "erros_pontuais": erros_pontuais,
         "creditos_esgotados": creditos_esgotados,
-        "pendentes_restantes": sum(1 for f in fornecedores if not f.get("cnpj")),
+        "teto_diario_atingido": teto_diario_atingido,
+        "pendentes_restantes": pendentes_restantes,
     }
 
 
@@ -182,12 +197,23 @@ async def consultar_cnd_endpoint(request: Request, job_id: str, limite: int | No
             status_code=400,
             detail="Consulta de CND não configurada (INFOSIMPLES_TOKEN ausente no servidor).",
         )
-    if store.obter(job_id) is None:
+    if not store.existe(job_id):
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    if budget.restante("cnd") <= 0:
+        raise HTTPException(status_code=429, detail="Teto diário de consultas de CND atingido.")
 
-    teto = limite or settings.cnd_limite_padrao
-    total = cnd.iniciar_consulta_job(job_id, teto)
-    return {"job_id": job_id, "status": "em_andamento", "total": total}
+    teto = max(1, min(limite or settings.cnd_limite_padrao, settings.cnd_limite_max))
+    res = cnd.iniciar_consulta_job(job_id, teto)
+    if res["status"] == "nao_encontrado":
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    if res["status"] == "ja_em_andamento":
+        raise HTTPException(status_code=409, detail="Já existe uma consulta de CND em andamento para este job.")
+    return {
+        "job_id": job_id,
+        "status": "em_andamento",
+        "total": res["total"],
+        "total_com_cnpj": res["total_com_cnpj"],
+    }
 
 
 @router.get("/resultado/{job_id}", response_model=ProcessarResponse)
@@ -224,7 +250,8 @@ async def progresso(job_id: str):
 
 
 @router.get("/relatorio/{job_id}")
-async def relatorio(job_id: str):
+@limiter.limit("30/minute")
+async def relatorio(request: Request, job_id: str):
     """Gera e devolve o relatório PDF do job (capa, sumário, tabelas por grupo)."""
     job = store.obter(job_id)
     if job is None:
@@ -261,21 +288,28 @@ async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
 
-    cnpj = re.sub(r"\D", "", body.cnpj)
+    # Preserva letras (CNPJ alfanumérico a partir de 2026), valida o DV e normaliza.
+    cnpj = re.sub(r"[^0-9A-Za-z]", "", body.cnpj).upper()
     if not cnpj_lookup.validar_cnpj(cnpj):
         raise HTTPException(status_code=422, detail="CNPJ inválido (dígito verificador não confere).")
 
-    fornecedores = job["fornecedores"]
-    alvo = next((f for f in fornecedores if f["cod_forn"] == body.cod_forn), None)
-    if alvo is None:
+    if not any(f["cod_forn"] == body.cod_forn for f in job["fornecedores"]):
         raise HTTPException(status_code=404, detail="Fornecedor não encontrado neste job.")
 
-    alvo["cnpj"] = cnpj
-    alvo["cnpj_pendente"] = False
-    alvo["cnpj_confirmado"] = True
-    alvo["cnpj_nao_casado"] = False
-    if body.razao_social and body.razao_social.strip():
-        alvo["nome_forn"] = body.razao_social.strip()
+    def _aplicar(j: dict) -> None:
+        for f in j["fornecedores"]:
+            if f["cod_forn"] == body.cod_forn:
+                f["cnpj"] = cnpj
+                f["cnpj_pendente"] = False
+                f["cnpj_confirmado"] = True
+                f["cnpj_nao_casado"] = False
+                if body.razao_social and body.razao_social.strip():
+                    f["nome_forn"] = body.razao_social.strip()
+                break
+        # Se a CND já rodou, reaplica o risco para manter a consistência após a correção.
+        if any(f.get("status_cnd") for f in j["fornecedores"]):
+            risk.aplicar_risco(j["fornecedores"])
 
-    store.atualizar(job_id, fornecedores=fornecedores)
-    return alvo
+    store.mutar(job_id, _aplicar)
+    atual = store.obter(job_id)
+    return next(f for f in atual["fornecedores"] if f["cod_forn"] == body.cod_forn)

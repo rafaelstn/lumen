@@ -2,6 +2,10 @@
 
 Substitui o scraping com Playwright+captcha do briefing: a Infosimples lida com o
 portal e o captcha do lado dela e entrega JSON. Mais robusto e sem manutenção de scraper.
+
+Concorrência: a task escreve cada resultado via store.mutar (atômico, sob lock);
+leituras (/resultado, /progresso) recebem cópia. Idempotência: só uma consulta por job
+de cada vez. Custo: cada consulta paga passa pelo teto global de orçamento.
 """
 import asyncio
 import logging
@@ -11,34 +15,38 @@ from datetime import datetime, timezone
 import httpx
 
 from app.config import settings
+from app.modules.modulo01 import budget
 from app.modules.modulo01.jobs import store
 
 logger = logging.getLogger("modulo01.cnd")
 
 # Status de regularidade fiscal.
-NEGATIVA = "NEGATIVA"                          # sem débitos — regular
-POSITIVA_EFEITO_NEGATIVA = "POSITIVA_EFEITO_NEGATIVA"  # débito parcelado/suspenso
-POSITIVA = "POSITIVA"                          # débito ativo — irregular
-FALHA = "FALHA"                                # não foi possível consultar
+NEGATIVA = "NEGATIVA"                                   # sem débitos — regular
+POSITIVA_EFEITO_NEGATIVA = "POSITIVA_EFEITO_NEGATIVA"   # débito parcelado/suspenso
+POSITIVA = "POSITIVA"                                   # débito ativo — irregular
+FALHA = "FALHA"                                         # não foi possível consultar/indeterminado
 
 _SERVICO = "receita-federal/pgfn"
 
 
+def _mascara_cnpj(cnpj: str) -> str:
+    """Mascara o CNPJ para log (não expõe o número completo associado a débito)."""
+    d = re.sub(r"\D", "", cnpj or "")
+    return f"{d[:2]}.***.***/{d[-2:]}" if len(d) == 14 else "***"
+
+
 def _tem_debitos(item: dict) -> bool:
-    for chave in ("debitos_rfb", "debitos_pgfn"):
-        v = item.get(chave)
-        if v:  # lista/string não-vazia
-            return True
-    return False
+    return bool(item.get("debitos_rfb")) or bool(item.get("debitos_pgfn"))
 
 
 def _mapear_status(item: dict) -> str:
     conseguiu = item.get("conseguiu_emitir_certidao_negativa")
+    if conseguiu is True:
+        return POSITIVA_EFEITO_NEGATIVA if _tem_debitos(item) else NEGATIVA
     if conseguiu is False:
         return POSITIVA
-    if _tem_debitos(item):
-        return POSITIVA_EFEITO_NEGATIVA
-    return NEGATIVA
+    # Campo ausente/indeterminado: não assume regularidade — marca FALHA.
+    return FALHA
 
 
 async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
@@ -50,10 +58,7 @@ async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
         "timeout": str(settings.infosimples_timeout),
         "ignore_site_receipt": "1",
     }
-    base = {
-        "cnpj": so_digitos,
-        "data_consulta": datetime.now(timezone.utc).isoformat(),
-    }
+    base = {"cnpj": so_digitos, "data_consulta": datetime.now(timezone.utc).isoformat()}
     try:
         resp = await client.post(
             f"{settings.infosimples_base_url}/{_SERVICO}",
@@ -62,17 +67,17 @@ async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
         )
         body = resp.json()
     except (httpx.HTTPError, ValueError) as exc:
-        logger.warning("CND falha de rede cnpj=%s: %s", so_digitos, exc)
+        logger.warning("CND falha de rede cnpj=%s: %s", _mascara_cnpj(so_digitos), exc)
         return {**base, "status": FALHA, "descricao": "Falha de comunicação com a fonte."}
 
     code = body.get("code")
     if code != 200 or not body.get("data"):
-        logger.info("CND sem resultado cnpj=%s code=%s", so_digitos, code)
+        logger.info("CND sem resultado cnpj=%s code=%s", _mascara_cnpj(so_digitos), code)
         return {**base, "status": FALHA, "descricao": body.get("code_message", "Consulta sem resultado.")}
 
     item = body["data"][0]
     status = _mapear_status(item)
-    logger.info("CND cnpj=%s status=%s", so_digitos, status)
+    logger.info("CND cnpj=%s status=%s", _mascara_cnpj(so_digitos), status)
     return {
         **base,
         "status": status,
@@ -86,65 +91,85 @@ async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
 _tasks: set[asyncio.Task] = set()
 
 
-def iniciar_consulta_job(job_id: str, limite: int) -> int:
-    """Dispara a consulta de CND em background para os fornecedores com CNPJ. Devolve o total."""
-    job = store.obter(job_id)
-    if job is None:
-        return 0
-    fornecedores = job["fornecedores"]
-    alvos = [f for f in fornecedores if f.get("cnpj") and not f.get("status_cnd")][:limite]
-    total = len(alvos)
-    store.atualizar(
-        job_id,
-        cnd_progresso={"total": total, "consultados": 0, "falhas": 0, "percentual": 0.0, "status": "em_andamento"},
-    )
+def iniciar_consulta_job(job_id: str, limite: int) -> dict:
+    """Inicia a consulta de CND em background. Idempotente: não dispara se já em andamento.
+
+    Retorna {status: iniciado|ja_em_andamento|nao_encontrado, total, total_com_cnpj}.
+    """
+    info: dict = {}
+
+    def _preparar(job: dict) -> None:
+        prog = job.get("cnd_progresso")
+        if prog and prog.get("status") == "em_andamento":
+            info["status"] = "ja_em_andamento"
+            return
+        fornecedores = job["fornecedores"]
+        com_cnpj = [f for f in fornecedores if f.get("cnpj") and not f.get("status_cnd")]
+        alvos = [(f["cod_forn"], f["cnpj"]) for f in com_cnpj[:limite]]
+        total = len(alvos)
+        info.update(status="iniciado", total=total, total_com_cnpj=len(com_cnpj), alvos=alvos)
+        job["cnd_progresso"] = {
+            "total": total,
+            "total_com_cnpj": len(com_cnpj),
+            "consultados": 0,
+            "falhas": 0,
+            "percentual": 0.0 if total else 100.0,
+            "status": "em_andamento" if total else "concluido",
+        }
+
+    if not store.mutar(job_id, _preparar):
+        return {"status": "nao_encontrado"}
+    if info.get("status") == "ja_em_andamento":
+        return {"status": "ja_em_andamento"}
+
+    total = info["total"]
     if total:
-        task = asyncio.create_task(_processar(job_id, fornecedores, alvos, total))
+        task = asyncio.create_task(_processar(job_id, info["alvos"], total))
         _tasks.add(task)
         task.add_done_callback(_tasks.discard)
-    else:
-        store.atualizar(job_id, cnd_progresso={"total": 0, "consultados": 0, "falhas": 0, "percentual": 100.0, "status": "concluido"})
-    return total
+    return {"status": "iniciado", "total": total, "total_com_cnpj": info["total_com_cnpj"]}
 
 
-async def _processar(job_id: str, fornecedores: list, alvos: list, total: int) -> None:
+async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> None:
     sem = asyncio.Semaphore(settings.cnd_concorrencia)
-    estado = {"consultados": 0, "falhas": 0}
 
     async with httpx.AsyncClient() as client:
-        async def um(f: dict) -> None:
+        async def um(cod_forn: str, cnpj: str) -> None:
             async with sem:
-                r = await consultar_cnd(f["cnpj"], client)
-            f["status_cnd"] = r["status"]
-            f["cnd_descricao"] = r.get("descricao")
-            estado["consultados"] += 1
-            if r["status"] == FALHA:
-                estado["falhas"] += 1
-            store.atualizar(
-                job_id,
-                cnd_progresso={
-                    "total": total,
-                    "consultados": estado["consultados"],
-                    "falhas": estado["falhas"],
-                    "percentual": round(estado["consultados"] / total * 100, 1),
-                    "status": "em_andamento",
-                },
-            )
+                if not budget.consumir("cnd"):
+                    r = {"status": FALHA, "descricao": "Teto diário de consultas atingido."}
+                else:
+                    r = await consultar_cnd(cnpj, client)
 
-        await asyncio.gather(*[um(f) for f in alvos])
+            def aplicar(job: dict) -> None:
+                for f in job["fornecedores"]:
+                    if f["cod_forn"] == cod_forn:
+                        f["status_cnd"] = r["status"]
+                        f["cnd_descricao"] = r.get("descricao")
+                        break
+                prog = job.get("cnd_progresso") or {"total": total, "consultados": 0, "falhas": 0}
+                prog["consultados"] = prog.get("consultados", 0) + 1
+                if r["status"] == FALHA:
+                    prog["falhas"] = prog.get("falhas", 0) + 1
+                prog["percentual"] = round(prog["consultados"] / total * 100, 1) if total else 100.0
+                if prog["consultados"] >= total:
+                    prog["status"] = "concluido"
+                job["cnd_progresso"] = prog
+
+            if not store.mutar(job_id, aplicar):
+                logger.warning("CND: job %s expirou durante a consulta; resultado descartado.", job_id)
+
+        await asyncio.gather(*[um(cod, cnpj) for cod, cnpj in alvos])
 
     # Fase 4: calcula o risco 2027 após ter os status de CND.
     from app.modules.modulo01 import risk
 
-    risk.aplicar_risco(fornecedores)
-    store.atualizar(
-        job_id,
-        fornecedores=fornecedores,
-        cnd_progresso={
-            "total": total,
-            "consultados": estado["consultados"],
-            "falhas": estado["falhas"],
-            "percentual": 100.0,
-            "status": "concluido",
-        },
-    )
+    def finalizar(job: dict) -> None:
+        risk.aplicar_risco(job["fornecedores"])
+        prog = job.get("cnd_progresso") or {}
+        prog["status"] = "concluido"
+        prog["percentual"] = 100.0
+        job["cnd_progresso"] = prog
+
+    if not store.mutar(job_id, finalizar):
+        logger.warning("CND: job %s expirou antes de aplicar o risco 2027.", job_id)
