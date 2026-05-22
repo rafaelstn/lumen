@@ -28,6 +28,8 @@ def _pct(valor) -> str:
 
 
 def _contexto(job: dict) -> dict:
+    from app.modules.modulo01 import risk
+
     fornecedores = job.get("fornecedores", [])
     verificacao_manual = [
         f
@@ -35,7 +37,11 @@ def _contexto(job: dict) -> dict:
         if f.get("verificar_st")
         or f.get("cnpj_pendente")
         or (f.get("cnpj") and not f.get("cnpj_confirmado"))
+        or f.get("status_cnd") == "FALHA"
     ]
+    alertas_risco = risk.alertas_ordenados(fornecedores)
+    impacto_total = sum(a.get("impacto_financeiro_anual") or 0 for a in alertas_risco)
+    cnd_consultada = any(f.get("status_cnd") for f in fornecedores)
     return {
         "metadados": job.get("metadados", {}),
         "resumo": job.get("resumo", {}),
@@ -44,6 +50,9 @@ def _contexto(job: dict) -> dict:
         "grupo_c": [f for f in fornecedores if f["grupo"] == "C"],
         "grupo_indef": [f for f in fornecedores if f["grupo"] == "INDEFINIDO"],
         "verificacao_manual": verificacao_manual,
+        "alertas_risco": alertas_risco,
+        "impacto_total": impacto_total,
+        "cnd_consultada": cnd_consultada,
         "emitido_em": datetime.now().strftime("%d/%m/%Y"),
     }
 

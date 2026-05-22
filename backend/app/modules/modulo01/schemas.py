@@ -13,6 +13,11 @@ class FornecedorResult(BaseModel):
     label: str
     verificar_st: bool = False
     tem_estorno: bool = False
+    status_cnd: str | None = None
+    cnd_descricao: str | None = None
+    risco_2027: str | None = None
+    motivo_risco: str | None = None
+    impacto_financeiro_anual: float | None = None
     total_compras: float
     total_valor_icms: float
     aliquota_max: float

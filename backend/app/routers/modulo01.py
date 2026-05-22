@@ -13,7 +13,7 @@ import httpx
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 
 from app.config import settings
-from app.modules.modulo01 import cnpj_lookup, pdf_generator, service
+from app.modules.modulo01 import cnd, cnpj_lookup, pdf_generator, service
 from app.modules.modulo01.jobs import store
 from app.modules.modulo01.parser import ParserError
 from app.modules.modulo01.schemas import CnpjManualIn, ProcessarResponse
@@ -170,6 +170,38 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     }
 
 
+@router.post("/consultar-cnd/{job_id}")
+@limiter.limit("6/minute")
+async def consultar_cnd_endpoint(request: Request, job_id: str, limite: int | None = None):
+    """Inicia a consulta de CND (regularidade fiscal) em background para os fornecedores com CNPJ.
+
+    Passo sob demanda e com teto (controle de custo). Acompanhe pelo /progresso/{job_id}.
+    """
+    if not settings.infosimples_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Consulta de CND não configurada (INFOSIMPLES_TOKEN ausente no servidor).",
+        )
+    if store.obter(job_id) is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+
+    teto = limite or settings.cnd_limite_padrao
+    total = cnd.iniciar_consulta_job(job_id, teto)
+    return {"job_id": job_id, "status": "em_andamento", "total": total}
+
+
+@router.get("/progresso/{job_id}")
+async def progresso(job_id: str):
+    """Estado da consulta de CND (para polling do frontend)."""
+    job = store.obter(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    return job.get(
+        "cnd_progresso",
+        {"total": 0, "consultados": 0, "falhas": 0, "percentual": 0.0, "status": "nao_iniciado"},
+    )
+
+
 @router.get("/relatorio/{job_id}")
 async def relatorio(job_id: str):
     """Gera e devolve o relatório PDF do job (capa, sumário, tabelas por grupo)."""
@@ -179,12 +211,11 @@ async def relatorio(job_id: str):
 
     try:
         pdf = pdf_generator.gerar_pdf(job)
-    except Exception as exc:
+    except Exception:
         import logging
 
         logging.getLogger("modulo01").exception("Falha ao gerar PDF")
-        # TEMP debug: expor a causa real para diagnóstico; reverter para mensagem genérica depois.
-        raise HTTPException(status_code=500, detail=f"Falha ao gerar PDF: {type(exc).__name__}: {exc}")
+        raise HTTPException(status_code=500, detail="Falha ao gerar o relatório PDF.")
 
     cliente = (job.get("metadados") or {}).get("cliente") or "cliente"
     slug = re.sub(r"[^A-Za-z0-9]+", "_", cliente).strip("_").lower() or "cliente"

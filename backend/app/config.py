@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     cnpj_lookup_api_key: str = ""
     cnpj_lookup_limite_padrao: int = 20  # teto de fornecedores por chamada (controle de créditos)
 
+    # Consulta de CND (regularidade fiscal) via Infosimples. Token só via env.
+    cnd_provider: str = "infosimples"
+    infosimples_base_url: str = "https://api.infosimples.com/api/v2/consultas"
+    infosimples_token: str = ""
+    infosimples_timeout: int = 120  # timeout da consulta na origem (Infosimples), em segundos
+    cnd_limite_padrao: int = 20  # teto de fornecedores por chamada (controle de custo)
+    cnd_concorrencia: int = 4  # consultas CND simultâneas
+
     jobs_dir: str = "/app/_jobs"
 
     # Limites de upload e do store de jobs (proteção contra DoS/OOM).

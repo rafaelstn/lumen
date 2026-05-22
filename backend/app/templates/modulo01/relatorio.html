@@ -59,19 +59,41 @@
     <div class="card alerta"><div class="rotulo">Casos para verificação manual</div><div class="valor">{{ verificacao_manual | length }}</div></div>
   </div>
   <p class="nota">Distribuição: Grupo A (crédito pleno) {{ resumo.grupo_a }} · Grupo B (crédito simbólico) {{ resumo.grupo_b }} · Grupo C (sem crédito) {{ resumo.grupo_c }}{% if resumo.grupo_indefinido %} · Indefinido {{ resumo.grupo_indefinido }}{% endif %}.</p>
+  {% if cnd_consultada %}
+  <p class="nota">Fornecedores em risco para 2027: <strong>{{ alertas_risco | length }}</strong> · Impacto financeiro anual estimado: <strong>{{ impacto_total | moeda }}</strong>.</p>
+  {% endif %}
+
+  {% if alertas_risco %}
+  <h2>Alertas de Risco 2027</h2>
+  <p class="nota">Estes fornecedores oferecem crédito de ICMS em 2026, porém possuem débitos ativos na Receita Federal. A partir de 2027, empresas inadimplentes não poderão transferir crédito. Recomenda-se iniciar a qualificação de fornecedores alternativos.</p>
+  <table>
+    <thead><tr><th>Fornecedor</th><th>CNPJ</th><th>Status CND</th><th class="num">Impacto anual estimado</th></tr></thead>
+    <tbody>
+      {% for f in alertas_risco %}
+      <tr class="alerta">
+        <td>{{ f.nome_forn }}</td>
+        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.status_cnd }}</td>
+        <td class="num">{{ f.impacto_financeiro_anual | moeda }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
 
   <h2>Grupo A — Crédito Pleno (12% ou 18%)</h2>
   {% if grupo_a %}
   <table>
-    <thead><tr><th>CNPJ</th><th>Fornecedor</th><th class="num">Compras</th><th class="num">Alíq.</th><th class="num">ICMS aproveitado</th></tr></thead>
+    <thead><tr><th>CNPJ</th><th>Fornecedor</th><th class="num">Compras</th><th class="num">Alíq.</th><th class="num">ICMS aproveitado</th>{% if cnd_consultada %}<th>CND</th><th>Risco</th>{% endif %}</tr></thead>
     <tbody>
       {% for f in grupo_a %}
-      <tr>
+      <tr{% if f.risco_2027 == "ALTO" %} class="alerta"{% endif %}>
         <td>{{ f.cnpj or "—" }}</td>
         <td>{{ f.nome_forn }}{% if f.verificar_st %} <span class="pendente">(verificar ST)</span>{% endif %}</td>
         <td class="num">{{ f.total_compras | moeda }}</td>
         <td class="num">{{ f.aliquota_max | pct }}</td>
         <td class="num">{{ f.total_valor_icms | moeda }}</td>
+        {% if cnd_consultada %}<td>{{ f.status_cnd or "—" }}</td><td>{{ f.risco_2027 or "—" }}</td>{% endif %}
       </tr>
       {% endfor %}
     </tbody>
@@ -134,7 +156,9 @@
   </table>
   {% else %}<p class="nota">Nenhum caso pendente de verificação.</p>{% endif %}
 
-  <p class="nota">A consulta de regularidade fiscal (CND) e o alerta de risco 2027 serão incorporados a este relatório na etapa seguinte.</p>
+  {% if not cnd_consultada %}
+  <p class="nota">A consulta de regularidade fiscal (CND) e o alerta de risco 2027 não foram executados para este relatório.</p>
+  {% endif %}
 
 </body>
 </html>
