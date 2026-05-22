@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { processarArquivos, definirCnpjManual } from "../services/api.js";
+import { processarArquivos, definirCnpjManual, urlRelatorio } from "../services/api.js";
 import { moeda } from "../utils/format.js";
 import FileUpload from "../components/FileUpload.jsx";
 import ResultCard from "../components/ResultCard.jsx";
@@ -120,18 +120,28 @@ export default function Modulo01() {
             salvando={salvarCnpj.isPending}
           />
 
-          <button
-            type="button"
-            onClick={() => {
-              setResultado(null);
-              processar.reset();
-              setEntradas(null);
-              setCadastro(null);
-            }}
-            className="px-4 py-2 rounded-md border border-slate-300 text-sm text-slate-700"
-          >
-            Processar outro arquivo
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={urlRelatorio(resultado.job_id)}
+              target="_blank"
+              rel="noreferrer"
+              className="px-4 py-2 rounded-md bg-emerald-600 text-white text-sm"
+            >
+              Baixar Relatório PDF
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                setResultado(null);
+                processar.reset();
+                setEntradas(null);
+                setCadastro(null);
+              }}
+              className="px-4 py-2 rounded-md border border-slate-300 text-sm text-slate-700"
+            >
+              Processar outro arquivo
+            </button>
+          </div>
         </section>
       )}
     </div>

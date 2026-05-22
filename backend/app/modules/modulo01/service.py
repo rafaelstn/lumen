@@ -53,7 +53,8 @@ def _resumo(df: pd.DataFrame) -> dict:
     }
 
 
-def processar(entradas_path: str, cadastro_path: str | None = None) -> tuple[dict, list[dict]]:
+def processar(entradas_path: str, cadastro_path: str | None = None) -> tuple[dict, dict, list[dict]]:
+    metadados = parser.parse_metadados(entradas_path)
     df_entradas = parser.parse_entradas(entradas_path)
     df_cadastro = parser.parse_cadastro(cadastro_path) if cadastro_path else None
     merged = parser.merge_fornecedores(df_entradas, df_cadastro)
@@ -66,4 +67,4 @@ def processar(entradas_path: str, cadastro_path: str | None = None) -> tuple[dic
     )
 
     fornecedores = [_result(row) for _, row in classified.iterrows()]
-    return _resumo(classified), fornecedores
+    return metadados, _resumo(classified), fornecedores

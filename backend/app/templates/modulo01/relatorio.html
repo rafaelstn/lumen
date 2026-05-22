@@ -2,11 +2,139 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8" />
-  <title>Relatório de Análise Fiscal</title>
-  <!-- Template Jinja2 do PDF. Layout completo implementado na Fase 5. -->
+  <title>Relatório de Análise Fiscal de Fornecedores</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 2cm 1.8cm 2.2cm 1.8cm;
+      @bottom-center {
+        content: "Confidencial — Análise de Crédito Fiscal";
+        font-size: 8pt;
+        color: #94a3b8;
+      }
+      @bottom-right {
+        content: "Página " counter(page) " de " counter(pages);
+        font-size: 8pt;
+        color: #94a3b8;
+      }
+    }
+    body { font-family: "Helvetica Neue", Arial, sans-serif; color: #1e293b; font-size: 10pt; }
+    h1 { font-size: 22pt; margin: 0 0 4px; }
+    h2 { font-size: 14pt; border-bottom: 2px solid #0f172a; padding-bottom: 4px; margin-top: 28px; }
+    .capa { text-align: center; padding-top: 6cm; page-break-after: always; }
+    .capa .tag { display: inline-block; background: #0f172a; color: #fff; padding: 4px 12px; border-radius: 4px; font-size: 9pt; letter-spacing: 1px; }
+    .capa .cliente { font-size: 16pt; margin-top: 24px; font-weight: bold; }
+    .capa .meta { color: #475569; margin-top: 6px; }
+    .capa .conf { margin-top: 40px; color: #b91c1c; font-weight: bold; letter-spacing: 2px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 8.5pt; }
+    th { background: #f1f5f9; text-align: left; padding: 5px 6px; border-bottom: 1px solid #cbd5e1; }
+    td { padding: 4px 6px; border-bottom: 1px solid #e2e8f0; }
+    td.num, th.num { text-align: right; }
+    .cards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+    .card { flex: 1 1 40%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 10px 12px; }
+    .card .rotulo { font-size: 8pt; text-transform: uppercase; color: #64748b; }
+    .card .valor { font-size: 14pt; font-weight: bold; }
+    .alerta { background: #fef2f2; }
+    .nota { color: #64748b; font-size: 8.5pt; margin-top: 6px; }
+    .pendente { color: #b45309; }
+  </style>
 </head>
 <body>
-  <h1>Relatório de Análise Fiscal de Fornecedores</h1>
-  <p>Placeholder — conteúdo gerado na Fase 5.</p>
+
+  <section class="capa">
+    <h1>Análise Fiscal de Fornecedores</h1>
+    <p class="meta">Módulo 01 — Crédito de ICMS e Regularidade Fiscal</p>
+    <div class="cliente">{{ metadados.cliente or "Cliente não identificado" }}</div>
+    {% if metadados.cnpj_cliente %}<div class="meta">CNPJ: {{ metadados.cnpj_cliente }}</div>{% endif %}
+    {% if metadados.periodo %}<div class="meta">Período: {{ metadados.periodo }}</div>{% endif %}
+    <div class="meta">Emissão: {{ emitido_em }}</div>
+    <div class="conf">CONFIDENCIAL</div>
+  </section>
+
+  <h2>Sumário Executivo</h2>
+  <div class="cards">
+    <div class="card"><div class="rotulo">Fornecedores analisados</div><div class="valor">{{ resumo.total_fornecedores }}</div></div>
+    <div class="card"><div class="rotulo">Crédito ICMS aproveitado</div><div class="valor">{{ resumo.total_credito_aproveitado | moeda }}</div></div>
+    <div class="card"><div class="rotulo">Compras sem crédito (Simples)</div><div class="valor">{{ resumo.total_compras_sem_credito | moeda }}</div></div>
+    <div class="card alerta"><div class="rotulo">Casos para verificação manual</div><div class="valor">{{ verificacao_manual | length }}</div></div>
+  </div>
+  <p class="nota">Distribuição: Grupo A (crédito pleno) {{ resumo.grupo_a }} · Grupo B (crédito simbólico) {{ resumo.grupo_b }} · Grupo C (sem crédito) {{ resumo.grupo_c }}{% if resumo.grupo_indefinido %} · Indefinido {{ resumo.grupo_indefinido }}{% endif %}.</p>
+
+  <h2>Grupo A — Crédito Pleno (12% ou 18%)</h2>
+  {% if grupo_a %}
+  <table>
+    <thead><tr><th>CNPJ</th><th>Fornecedor</th><th class="num">Compras</th><th class="num">Alíq.</th><th class="num">ICMS aproveitado</th></tr></thead>
+    <tbody>
+      {% for f in grupo_a %}
+      <tr>
+        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.nome_forn }}{% if f.verificar_st %} <span class="pendente">(verificar ST)</span>{% endif %}</td>
+        <td class="num">{{ f.total_compras | moeda }}</td>
+        <td class="num">{{ f.aliquota_max | pct }}</td>
+        <td class="num">{{ f.total_valor_icms | moeda }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="nota">Nenhum fornecedor neste grupo.</p>{% endif %}
+
+  <h2>Grupo B — Crédito Simbólico (&lt; 10%)</h2>
+  {% if grupo_b %}
+  <table>
+    <thead><tr><th>CNPJ</th><th>Fornecedor</th><th class="num">Compras</th><th class="num">Alíq. efetiva</th><th class="num">ICMS gerado</th></tr></thead>
+    <tbody>
+      {% for f in grupo_b %}
+      <tr>
+        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.nome_forn }}</td>
+        <td class="num">{{ f.total_compras | moeda }}</td>
+        <td class="num">{{ f.aliquota_efetiva_pct | pct }}</td>
+        <td class="num">{{ f.total_valor_icms | moeda }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="nota">Nenhum fornecedor neste grupo.</p>{% endif %}
+
+  <h2>Grupo C — Sem Crédito (Simples Nacional)</h2>
+  {% if grupo_c %}
+  <table>
+    <thead><tr><th>CNPJ</th><th>Fornecedor</th><th class="num">Compras</th><th class="num">Crédito perdido estimado</th></tr></thead>
+    <tbody>
+      {% for f in grupo_c %}
+      <tr>
+        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.nome_forn }}</td>
+        <td class="num">{{ f.total_compras | moeda }}</td>
+        <td class="num">{{ f.credito_perdido | moeda }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="nota">Recomendação: avaliar substituição por fornecedor do Lucro Real/Presumido para recuperar o crédito de ICMS estimado.</p>
+  {% else %}<p class="nota">Nenhum fornecedor neste grupo.</p>{% endif %}
+
+  <h2>Casos para Verificação Manual</h2>
+  {% if verificacao_manual %}
+  <table>
+    <thead><tr><th>Fornecedor</th><th>CNPJ</th><th>Motivo</th></tr></thead>
+    <tbody>
+      {% for f in verificacao_manual %}
+      <tr>
+        <td>{{ f.nome_forn }}</td>
+        <td>{{ f.cnpj or "—" }}</td>
+        <td>
+          {% if f.verificar_st %}Alíquota ≥ 12% com ICMS zerado (possível Substituição Tributária). {% endif %}
+          {% if f.cnpj_pendente %}CNPJ não localizado. {% endif %}
+          {% if f.cnpj and not f.cnpj_confirmado %}CNPJ não confirmado (conferir). {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="nota">Nenhum caso pendente de verificação.</p>{% endif %}
+
+  <p class="nota">A consulta de regularidade fiscal (CND) e o alerta de risco 2027 serão incorporados a este relatório na etapa seguinte.</p>
+
 </body>
 </html>

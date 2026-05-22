@@ -35,9 +35,16 @@ class Resumo(BaseModel):
     cnpj_pendentes: int = 0
 
 
+class Metadados(BaseModel):
+    cliente: str | None = None
+    cnpj_cliente: str | None = None
+    periodo: str | None = None
+
+
 class ProcessarResponse(BaseModel):
     job_id: str
     status: str
+    metadados: Metadados
     resumo: Resumo
     fornecedores: list[FornecedorResult]
 

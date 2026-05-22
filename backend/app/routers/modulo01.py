@@ -7,12 +7,13 @@ Os endpoints de progresso e relatório (CND/PDF) entram nas fases 3 e 5.
 import os
 import re
 import tempfile
+from datetime import datetime
 
 import httpx
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 
 from app.config import settings
-from app.modules.modulo01 import cnpj_lookup, service
+from app.modules.modulo01 import cnpj_lookup, pdf_generator, service
 from app.modules.modulo01.jobs import store
 from app.modules.modulo01.parser import ParserError
 from app.modules.modulo01.schemas import CnpjManualIn, ProcessarResponse
@@ -81,7 +82,7 @@ async def processar(
     try:
         entradas_path = await _salvar_temp(entradas)
         cadastro_path = await _salvar_temp(cadastro) if cadastro is not None else None
-        resumo, fornecedores = service.processar(entradas_path, cadastro_path)
+        metadados, resumo, fornecedores = service.processar(entradas_path, cadastro_path)
     except HTTPException:
         raise
     except ParserError as exc:
@@ -99,13 +100,14 @@ async def processar(
     job_id = store.criar(
         {
             "status": "parsed",
+            "metadados": metadados,
             "resumo": resumo,
             "fornecedores": fornecedores,
         }
     )
 
     return ProcessarResponse(
-        job_id=job_id, status="parsed", resumo=resumo, fornecedores=fornecedores
+        job_id=job_id, status="parsed", metadados=metadados, resumo=resumo, fornecedores=fornecedores
     )
 
 
@@ -166,6 +168,29 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
         "creditos_esgotados": creditos_esgotados,
         "pendentes_restantes": sum(1 for f in fornecedores if not f.get("cnpj")),
     }
+
+
+@router.get("/relatorio/{job_id}")
+async def relatorio(job_id: str):
+    """Gera e devolve o relatório PDF do job (capa, sumário, tabelas por grupo)."""
+    job = store.obter(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+
+    try:
+        pdf = pdf_generator.gerar_pdf(job)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Falha ao gerar o relatório PDF.")
+
+    cliente = (job.get("metadados") or {}).get("cliente") or "cliente"
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", cliente).strip("_").lower() or "cliente"
+    data = datetime.now().strftime("%Y%m%d")
+    nome = f"relatorio_fiscal_{slug}_{data}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nome}"'},
+    )
 
 
 @router.post("/cnpj-manual/{job_id}")

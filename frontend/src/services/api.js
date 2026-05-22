@@ -28,6 +28,10 @@ export async function processarArquivos({ entradas, cadastro }) {
   return data;
 }
 
+export function urlRelatorio(jobId) {
+  return `${API_BASE}/api/modulo01/relatorio/${jobId}`;
+}
+
 export async function definirCnpjManual(jobId, { cod_forn, cnpj, razao_social }) {
   const { data } = await api.post(`/modulo01/cnpj-manual/${jobId}`, {
     cod_forn,

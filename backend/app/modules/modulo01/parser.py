@@ -89,6 +89,30 @@ def _read_excel(filepath: str) -> pd.DataFrame:
     return raw
 
 
+def parse_metadados(filepath: str) -> dict:
+    """Extrai os dados do cabeçalho do Livro de Entradas para a capa do relatório.
+
+    Linhas 0-4: nome do cliente (L0 C0), CNPJ (L1 C2), período (L3 C2).
+    Tolerante: campos ausentes voltam como None.
+    """
+    raw = _read_excel(filepath)
+
+    def _cell(linha, coluna):
+        if linha < len(raw) and coluna < raw.shape[1]:
+            v = raw.iloc[linha, coluna]
+            if v is not None and not (isinstance(v, float) and pd.isna(v)):
+                return str(v).strip()
+        return None
+
+    cnpj_raw = _cell(1, 2)
+    cnpj = re.sub(r"\D", "", cnpj_raw) if cnpj_raw else None
+    return {
+        "cliente": _cell(0, 0),
+        "cnpj_cliente": cnpj if cnpj and len(cnpj) == 14 else cnpj_raw,
+        "periodo": _cell(3, 2),
+    }
+
+
 def parse_entradas(filepath: str) -> pd.DataFrame:
     """Lê o Livro de Entradas e devolve os lançamentos de ICMS dos CFOPs de interesse.
 
