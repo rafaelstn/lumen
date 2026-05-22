@@ -2,17 +2,18 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Dependências de sistema do WeasyPrint. Nomes de pacote do Debian bookworm
-# (base do python:3.11-slim): libgdk-pixbuf-2.0-0 tem hífen extra vs. bullseye.
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpango-1.0-0 libpangoft2-1.0-0 libpangocairo-1.0-0 \
-    libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN playwright install chromium
-RUN playwright install-deps chromium
+
+# Tudo num único layer, com as listas do apt disponíveis até o final:
+# 1) libs de sistema do WeasyPrint (nomes do Debian bookworm)
+# 2) dependências Python
+# 3) Chromium do Playwright + suas dependências de SO (--with-deps)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpango-1.0-0 libpangoft2-1.0-0 libpangocairo-1.0-0 \
+        libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info && \
+    pip install --no-cache-dir -r requirements.txt && \
+    playwright install --with-deps chromium && \
+    rm -rf /var/lib/apt/lists/*
 
 COPY . .
 
