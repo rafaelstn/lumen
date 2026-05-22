@@ -1,4 +1,5 @@
 """Configuração central da aplicação, carregada de variáveis de ambiente."""
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,6 +8,17 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://fiscal_user:fiscal_pass@postgres:5432/fiscal_db"
     cors_origins: str = "http://localhost:3000"
+
+    @field_validator("database_url")
+    @classmethod
+    def _force_asyncpg_driver(cls, v: str) -> str:
+        # O Postgres gerenciado (ex.: Railway) entrega "postgresql://...".
+        # O SQLAlchemy async exige o driver explícito "postgresql+asyncpg://...".
+        if v.startswith("postgresql://"):
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        return v
 
     # Consulta CND
     cnd_portal_url: str = (
