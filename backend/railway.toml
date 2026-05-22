@@ -2,7 +2,10 @@
 builder = "dockerfile"
 
 [deploy]
-startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+# Envolto em /bin/sh -c: builds via Dockerfile rodam o startCommand em exec
+# form, que não expande variáveis de shell. Sem isso o uvicorn recebe a string
+# literal "$PORT" e crasha. O sh -c garante a expansão de $PORT em runtime.
+startCommand = "/bin/sh -c 'uvicorn app.main:app --host 0.0.0.0 --port $PORT'"
 healthcheckPath = "/health"
 healthcheckTimeout = 300
 restartPolicyType = "on_failure"
