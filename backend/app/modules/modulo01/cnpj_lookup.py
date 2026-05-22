@@ -31,6 +31,22 @@ class LookupError(Exception):
     """Erro de lookup com mensagem legível (créditos, auth, rede)."""
 
 
+def validar_cnpj(cnpj: str) -> bool:
+    """Valida um CNPJ pelos dígitos verificadores (rejeita entrada manual errada)."""
+    c = re.sub(r"\D", "", cnpj or "")
+    if len(c) != 14 or len(set(c)) == 1:
+        return False
+
+    def _dv(base: str, pesos: list[int]) -> str:
+        soma = sum(int(d) * p for d, p in zip(base, pesos))
+        resto = soma % 11
+        return "0" if resto < 2 else str(11 - resto)
+
+    dv1 = _dv(c[:12], [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    dv2 = _dv(c[:13], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2])
+    return c[12] == dv1 and c[13] == dv2
+
+
 def _normalizar(nome: str) -> str:
     """Uppercase, sem acentos, sem pontuação, espaços colapsados — para comparar nomes."""
     if not nome:

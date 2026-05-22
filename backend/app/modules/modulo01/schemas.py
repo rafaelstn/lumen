@@ -40,3 +40,9 @@ class ProcessarResponse(BaseModel):
     status: str
     resumo: Resumo
     fornecedores: list[FornecedorResult]
+
+
+class CnpjManualIn(BaseModel):
+    cod_forn: str
+    cnpj: str
+    razao_social: str | None = None

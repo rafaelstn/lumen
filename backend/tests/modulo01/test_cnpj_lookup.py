@@ -46,3 +46,11 @@ def test_nada_encontrado():
     r = cl.melhor_match("EMPRESA INEXISTENTE LTDA", [])
     assert r["confianca"] == cl.CONF_NAO_ENCONTRADO
     assert r["cnpj"] is None
+
+
+def test_validar_cnpj():
+    assert cl.validar_cnpj("37335118000180") is True       # CNPJ real (CNPJá)
+    assert cl.validar_cnpj("37.335.118/0001-80") is True    # formatado
+    assert cl.validar_cnpj("37335118000181") is False       # DV errado
+    assert cl.validar_cnpj("11111111111111") is False       # todos iguais
+    assert cl.validar_cnpj("123") is False                  # tamanho errado

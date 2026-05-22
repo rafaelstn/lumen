@@ -5,6 +5,7 @@ de entrada e orquestração de chamadas para os módulos em app/modules/modulo01
 Os endpoints de progresso e relatório (CND/PDF) entram nas fases 3 e 5.
 """
 import os
+import re
 import tempfile
 
 import httpx
@@ -14,7 +15,7 @@ from app.config import settings
 from app.modules.modulo01 import cnpj_lookup, service
 from app.modules.modulo01.jobs import store
 from app.modules.modulo01.parser import ParserError
-from app.modules.modulo01.schemas import ProcessarResponse
+from app.modules.modulo01.schemas import CnpjManualIn, ProcessarResponse
 from app.ratelimit import limiter
 
 router = APIRouter()
@@ -165,3 +166,35 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
         "creditos_esgotados": creditos_esgotados,
         "pendentes_restantes": sum(1 for f in fornecedores if not f.get("cnpj")),
     }
+
+
+@router.post("/cnpj-manual/{job_id}")
+@limiter.limit("30/minute")
+async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
+    """Define manualmente a razão social e o CNPJ de um fornecedor (sem consumir créditos).
+
+    Usado para os fornecedores que a busca automática não confirmou. Valida o dígito
+    verificador do CNPJ e marca como confirmado (entrada do usuário).
+    """
+    job = store.obter(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+
+    cnpj = re.sub(r"\D", "", body.cnpj)
+    if not cnpj_lookup.validar_cnpj(cnpj):
+        raise HTTPException(status_code=422, detail="CNPJ inválido (dígito verificador não confere).")
+
+    fornecedores = job["fornecedores"]
+    alvo = next((f for f in fornecedores if f["cod_forn"] == body.cod_forn), None)
+    if alvo is None:
+        raise HTTPException(status_code=404, detail="Fornecedor não encontrado neste job.")
+
+    alvo["cnpj"] = cnpj
+    alvo["cnpj_pendente"] = False
+    alvo["cnpj_confirmado"] = True
+    alvo["cnpj_nao_casado"] = False
+    if body.razao_social and body.razao_social.strip():
+        alvo["nome_forn"] = body.razao_social.strip()
+
+    store.atualizar(job_id, fornecedores=fornecedores)
+    return alvo
