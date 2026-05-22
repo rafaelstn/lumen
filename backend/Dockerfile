@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+# Fixado em bookworm (Debian 12): a tag "slim" passou a apontar para o trixie
+# (Debian 13), que o Playwright 1.44 ainda não reconhece no install-deps.
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
