@@ -190,6 +190,27 @@ async def consultar_cnd_endpoint(request: Request, job_id: str, limite: int | No
     return {"job_id": job_id, "status": "em_andamento", "total": total}
 
 
+@router.get("/resultado/{job_id}", response_model=ProcessarResponse)
+async def resultado_job(job_id: str):
+    """Devolve o estado atual do job (fornecedores atualizados após CNPJ/CND)."""
+    job = store.obter(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+
+    fornecedores = job["fornecedores"]
+    resumo = dict(job["resumo"])
+    # Recalcula os contadores de CNPJ, que mudam após enriquecimento/edição manual.
+    resumo["cnpj_pendentes"] = sum(1 for f in fornecedores if not f.get("cnpj"))
+    resumo["cnpj_casados"] = sum(1 for f in fornecedores if f.get("cnpj"))
+    return ProcessarResponse(
+        job_id=job_id,
+        status=job.get("status", "parsed"),
+        metadados=job.get("metadados", {}),
+        resumo=resumo,
+        fornecedores=fornecedores,
+    )
+
+
 @router.get("/progresso/{job_id}")
 async def progresso(job_id: str):
     """Estado da consulta de CND (para polling do frontend)."""

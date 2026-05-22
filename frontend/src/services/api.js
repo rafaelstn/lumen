@@ -41,4 +41,31 @@ export async function definirCnpjManual(jobId, { cod_forn, cnpj, razao_social })
   return data;
 }
 
+// Enriquecimento automático de CNPJ a partir da razão social (assíncrono/sob demanda).
+export async function enriquecerCnpj(jobId, limite) {
+  const params = limite ? { limite } : undefined;
+  const { data } = await api.post(`/modulo01/enriquecer-cnpj/${jobId}`, null, { params });
+  return data;
+}
+
+// Dispara a consulta de CND (regularidade fiscal). Roda no servidor de forma
+// assíncrona; o progresso é acompanhado via consultarProgresso (polling).
+export async function consultarCnd(jobId, limite) {
+  const params = limite ? { limite } : undefined;
+  const { data } = await api.post(`/modulo01/consultar-cnd/${jobId}`, null, { params });
+  return data;
+}
+
+// Snapshot do progresso da consulta CND: { total, consultados, falhas, percentual, status }.
+export async function consultarProgresso(jobId) {
+  const { data } = await api.get(`/modulo01/progresso/${jobId}`);
+  return data;
+}
+
+// Estado atual do job (fornecedores atualizados após enriquecimento de CNPJ e CND).
+export async function consultarResultado(jobId) {
+  const { data } = await api.get(`/modulo01/resultado/${jobId}`);
+  return data;
+}
+
 export default api;
