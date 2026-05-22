@@ -179,8 +179,12 @@ async def relatorio(job_id: str):
 
     try:
         pdf = pdf_generator.gerar_pdf(job)
-    except Exception:
-        raise HTTPException(status_code=500, detail="Falha ao gerar o relatório PDF.")
+    except Exception as exc:
+        import logging
+
+        logging.getLogger("modulo01").exception("Falha ao gerar PDF")
+        # TEMP debug: expor a causa real para diagnóstico; reverter para mensagem genérica depois.
+        raise HTTPException(status_code=500, detail=f"Falha ao gerar PDF: {type(exc).__name__}: {exc}")
 
     cliente = (job.get("metadados") or {}).get("cliente") or "cliente"
     slug = re.sub(r"[^A-Za-z0-9]+", "_", cliente).strip("_").lower() or "cliente"
