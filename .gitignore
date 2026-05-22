@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Env / secrets
+.env
+*.env
+!.env.example
+
+# Node
+node_modules/
+dist/
+
+# Jobs / dados sensíveis do cliente (uploads, logs, PDFs gerados)
+backend/_jobs/
+*.xls
+*.xlsx
+!**/fixtures/**
+
+# Docker
+postgres_data/
+
+# IDE / OS
+.DS_Store
+.idea/
+.vscode/

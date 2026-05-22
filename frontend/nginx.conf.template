@@ -1,0 +1,22 @@
+events {}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+    sendfile on;
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+
+    server {
+        listen ${PORT};
+        server_name _;
+
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # SPA: qualquer rota cai no index.html (React Router client-side).
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+    }
+}
