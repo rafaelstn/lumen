@@ -16,9 +16,10 @@ dist/
 
 # Jobs / dados sensíveis do cliente (uploads, logs, PDFs gerados)
 backend/_jobs/
+# Planilhas reais do cliente NUNCA entram no repo (dado fiscal confidencial).
+# Fixtures de teste usam arquivos locais não versionados (ver tests/fixtures/).
 *.xls
 *.xlsx
-!**/fixtures/**
 
 # Docker
 postgres_data/

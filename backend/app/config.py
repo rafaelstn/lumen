@@ -34,6 +34,13 @@ class Settings(BaseSettings):
 
     jobs_dir: str = "/app/_jobs"
 
+    # Limites de upload e do store de jobs (proteção contra DoS/OOM).
+    max_upload_mb: int = 10
+    max_linhas_planilha: int = 50000
+    job_ttl_seconds: int = 3600
+    job_cap: int = 200
+    rate_limit_processar: str = "5/minute"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

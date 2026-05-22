@@ -19,4 +19,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY . .
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Sem --reload (modo debug). O dev local usa o docker-compose, que sobrescreve o
+# comando com --reload; em produção o railway.toml define o startCommand.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
