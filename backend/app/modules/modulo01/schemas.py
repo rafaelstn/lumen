@@ -8,6 +8,7 @@ class FornecedorResult(BaseModel):
     cnpj: str | None = None
     cnpj_pendente: bool = True
     cnpj_nao_casado: bool = False
+    cnpj_confirmado: bool = False
     grupo: str
     label: str
     verificar_st: bool = False

@@ -19,6 +19,7 @@ def _result(row: pd.Series) -> dict:
         "cnpj": row["cnpj"],
         "cnpj_pendente": bool(row["cnpj_pendente"]),
         "cnpj_nao_casado": bool(row.get("cnpj_nao_casado", False)),
+        "cnpj_confirmado": bool(row.get("cnpj_confirmado", False)),
         "grupo": row["grupo"],
         "label": row["label"],
         "verificar_st": bool(row["verificar_st"]),

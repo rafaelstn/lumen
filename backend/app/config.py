@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     captcha_provider: str = "2captcha"
     captcha_api_key: str = ""
 
+    # Lookup de CNPJ por nome / enriquecimento (CNPJá). Chave só via env, nunca no código.
+    cnpj_lookup_provider: str = "cnpja"
+    cnpj_lookup_base_url: str = "https://api.cnpja.com"
+    cnpj_lookup_api_key: str = ""
+    cnpj_lookup_limite_padrao: int = 20  # teto de fornecedores por chamada (controle de créditos)
+
     jobs_dir: str = "/app/_jobs"
 
     # Limites de upload e do store de jobs (proteção contra DoS/OOM).

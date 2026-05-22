@@ -7,10 +7,11 @@ Os endpoints de progresso e relatório (CND/PDF) entram nas fases 3 e 5.
 import os
 import tempfile
 
+import httpx
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile
 
 from app.config import settings
-from app.modules.modulo01 import service
+from app.modules.modulo01 import cnpj_lookup, service
 from app.modules.modulo01.jobs import store
 from app.modules.modulo01.parser import ParserError
 from app.modules.modulo01.schemas import ProcessarResponse
@@ -105,3 +106,62 @@ async def processar(
     return ProcessarResponse(
         job_id=job_id, status="parsed", resumo=resumo, fornecedores=fornecedores
     )
+
+
+@router.post("/enriquecer-cnpj/{job_id}")
+@limiter.limit("3/minute")
+async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = None):
+    """Busca o CNPJ por razão social dos fornecedores pendentes de um job (consome créditos).
+
+    Passo sob demanda e com teto (controle de custo): a classificação não consome
+    créditos; só esta chamada consulta a API externa. Para no primeiro sinal de
+    créditos esgotados, preservando o que já casou.
+    """
+    if not settings.cnpj_lookup_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Busca de CNPJ não configurada (CNPJ_LOOKUP_API_KEY ausente no servidor).",
+        )
+
+    job = store.obter(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+
+    teto = limite or settings.cnpj_lookup_limite_padrao
+    fornecedores = job["fornecedores"]
+    pendentes = [f for f in fornecedores if not f.get("cnpj")][:teto]
+
+    contagem = {"processados": 0, "confirmados": 0, "baixa_confianca": 0, "ambiguos": 0, "nao_encontrados": 0}
+    creditos_esgotados = False
+
+    async with httpx.AsyncClient() as client:
+        for f in pendentes:
+            try:
+                r = await cnpj_lookup.buscar_por_nome(f["nome_forn"], None, client)
+            except cnpj_lookup.LookupError as exc:
+                if "créditos" in str(exc) or "Limite" in str(exc):
+                    creditos_esgotados = True
+                    break
+                continue  # erro pontual: pula o fornecedor, segue os demais
+            contagem["processados"] += 1
+            conf = r["confianca"]
+            if conf in (cnpj_lookup.CONF_ALTA, cnpj_lookup.CONF_BAIXA):
+                f["cnpj"] = r["cnpj"]
+                f["cnpj_pendente"] = False
+                f["cnpj_confirmado"] = conf == cnpj_lookup.CONF_ALTA
+                if conf == cnpj_lookup.CONF_ALTA:
+                    contagem["confirmados"] += 1
+                else:
+                    contagem["baixa_confianca"] += 1
+            elif conf == cnpj_lookup.CONF_AMBIGUO:
+                contagem["ambiguos"] += 1
+            else:
+                contagem["nao_encontrados"] += 1
+
+    store.atualizar(job_id, fornecedores=fornecedores)
+    return {
+        "job_id": job_id,
+        **contagem,
+        "creditos_esgotados": creditos_esgotados,
+        "pendentes_restantes": sum(1 for f in fornecedores if not f.get("cnpj")),
+    }
