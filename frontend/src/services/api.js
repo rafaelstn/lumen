@@ -18,4 +18,14 @@ export async function getModulo01Status() {
   return data;
 }
 
+export async function processarArquivos({ entradas, cadastro }) {
+  const form = new FormData();
+  form.append("entradas", entradas);
+  if (cadastro) form.append("cadastro", cadastro);
+  const { data } = await api.post("/modulo01/processar", form, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+  return data;
+}
+
 export default api;
