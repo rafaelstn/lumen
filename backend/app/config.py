@@ -28,18 +28,6 @@ class Settings(BaseSettings):
             return v.replace("postgres://", "postgresql+asyncpg://", 1)
         return v
 
-    # Consulta CND
-    cnd_portal_url: str = (
-        "https://solucoes.receita.fazenda.gov.br/Servicos/certidaointernet/PJ/Emitir"
-    )
-    cnd_delay_min: float = 3.0
-    cnd_delay_max: float = 8.0
-    cnd_max_retries: int = 3
-
-    # Solver de captcha
-    captcha_provider: str = "2captcha"
-    captcha_api_key: str = ""
-
     # Lookup de CNPJ por nome / enriquecimento (CNPJá). Chave só via env, nunca no código.
     cnpj_lookup_provider: str = "cnpja"
     cnpj_lookup_base_url: str = "https://api.cnpja.com"
@@ -59,8 +47,6 @@ class Settings(BaseSettings):
     # Teto global diário de consultas pagas (blindagem de fatura, independe de IP).
     cnd_max_diario: int = 300
     cnpj_max_diario: int = 300
-
-    jobs_dir: str = "/app/_jobs"
 
     # Feature flags de módulo (roadmap). M02/M03 só ligam após o gate comercial do M01.
     modulo01_enabled: bool = True
