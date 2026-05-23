@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Menu } from "lucide-react";
 import Sidebar from "./components/Sidebar.jsx";
 import Modulo01 from "./pages/Modulo01.jsx";
+import Modulo02 from "./pages/Modulo02.jsx";
 import BancoFornecedores from "./pages/BancoFornecedores.jsx";
 
 // Título contextual da topbar conforme a view ativa.
 const TITULOS = {
   analise: "Análise de Crédito",
   fornecedores: "Banco de fornecedores",
+  score: "Score Fiscal de Fornecedores",
 };
 
 // Shell de dashboard: sidebar fixa (drawer no mobile) + área de conteúdo.
@@ -50,6 +52,7 @@ export default function App() {
         <main className="mx-auto max-w-7xl px-4 py-7 sm:px-6 sm:py-9 lg:px-8 lg:py-10">
           {view === "analise" && <Modulo01 />}
           {view === "fornecedores" && <BancoFornecedores />}
+          {view === "score" && <Modulo02 />}
         </main>
       </div>
     </div>

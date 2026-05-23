@@ -74,4 +74,40 @@ export async function consultarResultado(jobId) {
   return data;
 }
 
+// ---- MÓDULO 02 — Score Fiscal de Fornecedores --------------------------
+// Consultas que tocam due-diligence/monitorar/reavaliar consomem créditos da
+// API paga (InfoSimples). O servidor pode retornar 400 com detalhe
+// "INFOSIMPLES_TOKEN ausente" quando o token não está configurado.
+
+// Due diligence em lote: avalia uma lista de CNPJs e devolve o ranking
+// (pior score primeiro). { resultados, avaliados, teto_atingido }.
+export async function dueDiligence(cnpjs) {
+  const { data } = await api.post("/modulo02/due-diligence", { cnpjs });
+  return data;
+}
+
+// Avalia um CNPJ e o adiciona à carteira monitorada.
+export async function monitorarCnpj(cnpj) {
+  const { data } = await api.post("/modulo02/monitorar", { cnpj });
+  return data;
+}
+
+// Carteira monitorada atual.
+export async function listarMonitorados() {
+  const { data } = await api.get("/modulo02/monitorados");
+  return data;
+}
+
+// Re-consulta toda a carteira (pode demorar). { reavaliados, alertas_gerados, teto_atingido }.
+export async function reavaliarCarteira() {
+  const { data } = await api.post("/modulo02/reavaliar");
+  return data;
+}
+
+// Alertas gerados pela carteira.
+export async function listarAlertas() {
+  const { data } = await api.get("/modulo02/alertas");
+  return data;
+}
+
 export default api;

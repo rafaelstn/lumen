@@ -80,3 +80,89 @@ export const RISCO_2027 = {
 export function riscoMeta(risco) {
   return RISCO_2027[risco] ?? null;
 }
+
+// Formata CNPJ (14 dígitos) no padrão 00.000.000/0000-00; se não bater, devolve cru.
+export function formatarCnpj(valor) {
+  const so = String(valor ?? "").replace(/\D/g, "");
+  if (so.length !== 14) return valor ?? "—";
+  return so.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
+}
+
+// ---- MÓDULO 02 — Score Fiscal -----------------------------------------
+// Faixa de score do fornecedor: BAIXO <40 (signal), MEDIO 40-69 (âmbar),
+// ALTO ≥70 (jade). "ALTO" = fornecedor saudável; "BAIXO" = crítico.
+export const FAIXA_SCORE = {
+  ALTO: {
+    rotulo: "Saudável",
+    texto: "text-jade-700",
+    anel: "text-jade-500",
+    chip: "bg-jade-50 text-jade-700 border-jade-200",
+    solido: "bg-jade-600 text-white",
+    hex: "#059669",
+  },
+  MEDIO: {
+    rotulo: "Atenção",
+    texto: "text-amber-700",
+    anel: "text-amber-500",
+    chip: "bg-amber-50 text-amber-700 border-amber-200",
+    solido: "bg-amber-500 text-white",
+    hex: "#d97706",
+  },
+  BAIXO: {
+    rotulo: "Crítico",
+    texto: "text-signal-700",
+    anel: "text-signal-500",
+    chip: "bg-signal-50 text-signal-700 border-signal-200",
+    solido: "bg-signal-600 text-white",
+    hex: "#dc2626",
+  },
+};
+
+// Deriva a faixa a partir do score numérico quando o backend não a envia.
+export function faixaPorScore(score) {
+  const n = Number(score) || 0;
+  if (n >= 70) return "ALTO";
+  if (n >= 40) return "MEDIO";
+  return "BAIXO";
+}
+
+export function faixaMeta(faixa, score) {
+  return FAIXA_SCORE[faixa] ?? FAIXA_SCORE[faixaPorScore(score)];
+}
+
+// Rótulo legível dos componentes do score (dict {regime, situacao_cadastral, cnd, maturidade}).
+export const ROTULO_COMPONENTE = {
+  regime: "Regime",
+  situacao_cadastral: "Situação cadastral",
+  cnd: "Regularidade (CND)",
+  maturidade: "Maturidade",
+};
+
+// Metadados visuais por tipo de alerta do M02.
+export const TIPO_ALERTA = {
+  MUDANCA_STATUS: {
+    rotulo: "Mudança de status",
+    classe: "bg-amber-50 text-amber-700 border-amber-200",
+    ponto: "bg-amber-500",
+  },
+  SCORE_CRITICO: {
+    rotulo: "Score crítico",
+    classe: "bg-signal-50 text-signal-700 border-signal-200",
+    ponto: "bg-signal-600",
+  },
+  DEVEDOR_CONTUMAZ: {
+    rotulo: "Devedor contumaz",
+    classe: "bg-signal-50 text-signal-700 border-signal-200",
+    ponto: "bg-signal-600",
+  },
+};
+
+export function alertaMeta(tipo) {
+  return (
+    TIPO_ALERTA[tipo] ?? {
+      rotulo: tipo || "Alerta",
+      classe: "bg-slate-100 text-slate-600 border-slate-300",
+      ponto: "bg-slate-400",
+    }
+  );
+}

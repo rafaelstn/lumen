@@ -28,8 +28,8 @@ const MODULOS = [
     numero: "02",
     titulo: "Score Fiscal de Fornecedores",
     Icone: Wallet,
-    ativo: false,
-    tooltip: "Disponível após a validação do Módulo 01",
+    ativo: true,
+    subitens: [{ view: "score", rotulo: "Score & monitoramento", Icone: Gauge }],
   },
   {
     id: "m03",

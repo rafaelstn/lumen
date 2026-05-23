@@ -2,13 +2,7 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Search, Database, Loader2, AlertCircle, Building2 } from "lucide-react";
 import { buscarFornecedores } from "../services/api.js";
-
-// Formata CNPJ (14 dígitos) no padrão 00.000.000/0000-00; se não bater, devolve cru.
-function formatarCnpj(valor) {
-  const so = String(valor ?? "").replace(/\D/g, "");
-  if (so.length !== 14) return valor ?? "—";
-  return so.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, "$1.$2.$3/$4-$5");
-}
+import { formatarCnpj } from "../utils/format.js";
 
 const ROTULO_ORIGEM = {
   manual: { texto: "Manual", classe: "bg-amber-50 text-amber-700 border-amber-200" },
