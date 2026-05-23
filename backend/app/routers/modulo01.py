@@ -4,6 +4,7 @@ Regra de organização: routers não contêm lógica de negócio, apenas valida�
 de entrada e orquestração de chamadas para os módulos em app/modules/modulo01/.
 Os endpoints de progresso e relatório (CND/PDF) entram nas fases 3 e 5.
 """
+import logging
 import os
 import re
 import tempfile
@@ -13,8 +14,44 @@ import httpx
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 
 from app.config import settings
-from app.modules.modulo01 import budget, cnd, cnpj_lookup, pdf_generator, risk, service
+from app.database import async_session_factory
+from app.modules.modulo01 import (
+    budget,
+    cnd,
+    cnpj_lookup,
+    fornecedores_repo,
+    pdf_generator,
+    risk,
+    service,
+)
 from app.modules.modulo01.jobs import store
+
+logger = logging.getLogger("modulo01")
+
+
+async def _casar_com_banco(fornecedores: list[dict]) -> None:
+    """Preenche o CNPJ dos pendentes a partir do banco de fornecedores (grátis). Tolerante a falha."""
+    try:
+        async with async_session_factory() as session:
+            for f in fornecedores:
+                if not f.get("cnpj"):
+                    fr = await fornecedores_repo.buscar_exato(session, f["nome_forn"])
+                    if fr:
+                        f["cnpj"] = fr.cnpj
+                        f["cnpj_pendente"] = False
+                        f["cnpj_confirmado"] = True
+    except Exception:
+        logger.warning("Casamento com o banco de fornecedores indisponível.", exc_info=True)
+
+
+async def _salvar_no_banco(itens: list[tuple[str, str, str]]) -> None:
+    """Persiste (cnpj, razao_social, origem) resolvidos para reuso futuro. Tolerante a falha."""
+    try:
+        async with async_session_factory() as session:
+            for cnpj, razao, origem in itens:
+                await fornecedores_repo.upsert(session, cnpj, razao, origem)
+    except Exception:
+        logger.warning("Não foi possível salvar fornecedor(es) no banco.", exc_info=True)
 from app.modules.modulo01.parser import ParserError
 from app.modules.modulo01.schemas import CnpjManualIn, ProcessarResponse
 from app.ratelimit import limiter
@@ -97,6 +134,11 @@ async def processar(
             if caminho and os.path.exists(caminho):
                 os.remove(caminho)
 
+    # Casa CNPJ a partir do banco de fornecedores (cache de análises anteriores, grátis).
+    await _casar_com_banco(fornecedores)
+    resumo["cnpj_pendentes"] = sum(1 for f in fornecedores if not f.get("cnpj"))
+    resumo["cnpj_casados"] = sum(1 for f in fornecedores if f.get("cnpj"))
+
     job_id = store.criar(
         {
             "status": "parsed",
@@ -139,7 +181,7 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     erros_pontuais = 0
     creditos_esgotados = False
     teto_diario_atingido = False
-    achados: dict[str, tuple[str, bool]] = {}  # cod_forn -> (cnpj, confirmado)
+    achados: dict[str, tuple[str, bool, str]] = {}  # cod_forn -> (cnpj, confirmado, nome_oficial)
 
     async with httpx.AsyncClient() as client:
         for cod_forn, nome in pendentes:
@@ -157,7 +199,7 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
             contagem["processados"] += 1
             conf = r["confianca"]
             if conf in (cnpj_lookup.CONF_ALTA, cnpj_lookup.CONF_BAIXA):
-                achados[cod_forn] = (r["cnpj"], conf == cnpj_lookup.CONF_ALTA)
+                achados[cod_forn] = (r["cnpj"], conf == cnpj_lookup.CONF_ALTA, r.get("nome_oficial") or nome)
                 contagem["confirmados" if conf == cnpj_lookup.CONF_ALTA else "baixa_confianca"] += 1
             elif conf == cnpj_lookup.CONF_AMBIGUO:
                 contagem["ambiguos"] += 1
@@ -167,12 +209,15 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     def _aplicar(job: dict) -> None:
         for f in job["fornecedores"]:
             if f["cod_forn"] in achados:
-                cnpj, confirmado = achados[f["cod_forn"]]
+                cnpj, confirmado, _ = achados[f["cod_forn"]]
                 f["cnpj"] = cnpj
                 f["cnpj_pendente"] = False
                 f["cnpj_confirmado"] = confirmado
 
     store.mutar(job_id, _aplicar)
+    # Salva os CNPJ resolvidos no banco para reuso futuro (sem reconsultar a API paga).
+    await _salvar_no_banco([(cnpj, nome_of, "cnpja") for cnpj, _, nome_of in achados.values()])
+
     atual = store.obter(job_id)
     pendentes_restantes = sum(1 for f in atual["fornecedores"] if not f.get("cnpj")) if atual else 0
     return {
@@ -312,4 +357,23 @@ async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
 
     store.mutar(job_id, _aplicar)
     atual = store.obter(job_id)
-    return next(f for f in atual["fornecedores"] if f["cod_forn"] == body.cod_forn)
+    final = next(f for f in atual["fornecedores"] if f["cod_forn"] == body.cod_forn)
+    # Salva no banco para reuso futuro (correção manual vira conhecimento permanente).
+    await _salvar_no_banco([(cnpj, final["nome_forn"], "manual")])
+    return final
+
+
+@router.get("/fornecedores/buscar")
+@limiter.limit("60/minute")
+async def buscar_fornecedores(request: Request, q: str = ""):
+    """Busca gratuita no banco de fornecedores (cache local) por razão social."""
+    try:
+        async with async_session_factory() as session:
+            forns = await fornecedores_repo.buscar(session, q)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Busca de fornecedores temporariamente indisponível.")
+    return {
+        "resultados": [
+            {"cnpj": f.cnpj, "razao_social": f.razao_social, "origem": f.origem} for f in forns
+        ]
+    }
