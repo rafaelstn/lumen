@@ -62,6 +62,11 @@ class Settings(BaseSettings):
 
     jobs_dir: str = "/app/_jobs"
 
+    # Feature flags de módulo (roadmap). M02/M03 só ligam após o gate comercial do M01.
+    modulo01_enabled: bool = True
+    modulo02_enabled: bool = False
+    modulo03_enabled: bool = False
+
     # Limites de upload e do store de jobs (proteção contra DoS/OOM).
     max_upload_mb: int = 10
     max_linhas_planilha: int = 50000
