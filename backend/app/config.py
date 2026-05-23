@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     cnd_max_diario: int = 300
     cnpj_max_diario: int = 300
 
+    # Monitoramento automático (APScheduler) do M02. Desligado por padrão: consome
+    # consultas pagas todo dia. Ligar conscientemente (gasto recorrente). Reavaliação
+    # manual via POST /api/modulo02/reavaliar sempre disponível.
+    scheduler_enabled: bool = False
+    scheduler_hora: int = 3  # hora do dia (0-23) para o monitoramento diário
+
     # Feature flags de módulo (roadmap). M02/M03 só ligam após o gate comercial do M01.
     modulo01_enabled: bool = True
     modulo02_enabled: bool = True

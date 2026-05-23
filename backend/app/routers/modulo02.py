@@ -90,6 +90,16 @@ async def monitorar(request: Request, body: MonitorarIn, escritorio: str = Depen
     return {**avaliacao, "monitorado": True}
 
 
+@router.post("/reavaliar")
+@limiter.limit("2/minute")
+async def reavaliar(request: Request, escritorio: str = Depends(escritorio_atual)):
+    """Re-consulta a carteira monitorada agora (sob demanda), gerando alertas em mudança."""
+    if not settings.infosimples_token:
+        raise HTTPException(status_code=400, detail="CND não configurada (INFOSIMPLES_TOKEN ausente).")
+    async with async_session_factory() as session:
+        return await service.reavaliar_carteira(session, escritorio)
+
+
 @router.get("/monitorados")
 async def monitorados(escritorio: str = Depends(escritorio_atual)):
     """Carteira monitorada, ordenada por score (pior primeiro)."""

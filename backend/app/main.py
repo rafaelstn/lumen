@@ -31,6 +31,13 @@ async def lifespan(app: FastAPI):
                 await session.commit()
     except Exception:
         logging.getLogger("startup").exception("Não foi possível criar/verificar as tabelas.")
+
+    try:
+        from app.scheduler import iniciar as iniciar_scheduler
+
+        iniciar_scheduler()  # inerte se scheduler_enabled=False
+    except Exception:
+        logging.getLogger("startup").exception("Não foi possível iniciar o scheduler.")
     yield
 
 
