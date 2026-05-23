@@ -8,20 +8,27 @@ from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.ratelimit import limiter
-from app.routers import modulo01
+from app.routers import modulo01, modulo02
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Cria a tabela do banco de fornecedores. Tolerante: se o DB estiver indisponível,
-    # loga e segue (a app funciona sem o cache; o casamento por banco apenas não ocorre).
+    # Cria as tabelas e semeia o escritório default. Tolerante: se o DB estiver
+    # indisponível, loga e segue (recursos que dependem do banco apenas não funcionam).
     try:
-        from app.database import engine
-        from app.models import fornecedor  # noqa: F401 — registra o modelo no metadata
+        from app.database import async_session_factory, engine
+        from app.models import escritorio, fornecedor  # noqa: F401 — registra no metadata
         from app.models.base import Base
+        from app.models.escritorio import Escritorio
+        from app.modules.modulo02 import models as _m02  # noqa: F401 — registra no metadata
 
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+
+        async with async_session_factory() as session:
+            if await session.get(Escritorio, settings.escritorio_default_id) is None:
+                session.add(Escritorio(id=settings.escritorio_default_id, nome="Escritório padrão"))
+                await session.commit()
     except Exception:
         logging.getLogger("startup").exception("Não foi possível criar/verificar as tabelas.")
     yield
@@ -40,6 +47,8 @@ app.add_middleware(
 )
 
 app.include_router(modulo01.router, prefix="/api/modulo01", tags=["Módulo 01"])
+if settings.modulo02_enabled:
+    app.include_router(modulo02.router, prefix="/api/modulo02", tags=["Módulo 02"])
 
 
 @app.get("/health")

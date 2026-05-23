@@ -50,8 +50,15 @@ class Settings(BaseSettings):
 
     # Feature flags de módulo (roadmap). M02/M03 só ligam após o gate comercial do M01.
     modulo01_enabled: bool = True
-    modulo02_enabled: bool = False
-    modulo03_enabled: bool = False
+    modulo02_enabled: bool = True
+    modulo03_enabled: bool = True
+
+    # Auth (JWT próprio) — preparado, NÃO ativo no MVP. O login real entra depois;
+    # por ora todo dado pertence ao escritório default (single-tenant na prática).
+    jwt_secret: str = "trocar-em-producao"
+    jwt_algorithm: str = "HS256"
+    jwt_expira_min: int = 480
+    escritorio_default_id: str = "00000000-0000-0000-0000-000000000001"
 
     # Limites de upload e do store de jobs (proteção contra DoS/OOM).
     max_upload_mb: int = 10

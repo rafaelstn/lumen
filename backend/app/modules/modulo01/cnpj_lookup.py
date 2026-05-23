@@ -163,4 +163,5 @@ async def consultar_cnpj(cnpj: str, client: httpx.AsyncClient) -> dict:
         "nome_oficial": d.get("company", {}).get("name"),
         "situacao_cadastral": status.get("text"),
         "simples_optante": simples.get("optant"),
+        "fundacao": d.get("founded"),  # usado pelo score (maturidade do CNPJ)
     }
