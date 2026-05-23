@@ -39,7 +39,6 @@ const DistribuicaoGrupos = lazy(() => import("../components/DistribuicaoGrupos.j
 // upload → classificação → (CNPJ manual) → consulta CND assíncrona com polling → dashboard final → PDF.
 export default function Modulo01() {
   const [entradas, setEntradas] = useState(null);
-  const [cadastro, setCadastro] = useState(null);
   const [resultado, setResultado] = useState(null);
   const [erroCnpj, setErroCnpj] = useState(null);
 
@@ -68,6 +67,8 @@ export default function Modulo01() {
           f.cod_forn === fornAtualizado.cod_forn ? fornAtualizado : f
         ),
       }));
+      // Re-fetch para recalcular o resumo (pendentes, casados) e os KPIs.
+      recarregarResultado(resultado.job_id);
     },
     onError: (e) => setErroCnpj(e?.response?.data?.detail ?? "Não foi possível salvar o CNPJ."),
   });
@@ -148,7 +149,6 @@ export default function Modulo01() {
     processar.reset();
     dispararCnd.reset();
     setEntradas(null);
-    setCadastro(null);
     setProgresso(null);
     setErroCnd(null);
     setErroCnpj(null);
@@ -160,21 +160,19 @@ export default function Modulo01() {
   // ---- ESTADO 1: UPLOAD --------------------------------------------------
   if (!resultado) {
     return (
-      <div className="mx-auto max-w-3xl animate-fade-up">
+      <div className="mx-auto max-w-xl animate-fade-up">
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-panel sm:p-8">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-ink-900 text-jade-400">
-              <ScanLine className="h-5 w-5" />
+          <div className="flex flex-col items-center text-center">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-ink-900 text-jade-400">
+              <ScanLine className="h-6 w-6" />
             </span>
-            <div>
-              <h1 className="font-display text-2xl font-600 tracking-tight text-ink-900">Nova análise</h1>
-              <p className="text-sm text-slate-500">
-                Envie os arquivos fiscais para classificar os fornecedores por crédito de ICMS.
-              </p>
-            </div>
+            <h1 className="mt-4 font-display text-2xl font-600 tracking-tight text-ink-900">Nova análise</h1>
+            <p className="mt-1 max-w-sm text-sm text-slate-500">
+              Envie o Livro de Entradas para classificar os fornecedores por crédito de ICMS.
+            </p>
           </div>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <div className="mt-7">
             <FileUpload
               label="Livro de Entradas"
               hint="Documento obrigatório com os lançamentos de entrada."
@@ -182,13 +180,16 @@ export default function Modulo01() {
               file={entradas}
               onChange={setEntradas}
             />
-            <FileUpload
-              label="Cadastro de Fornecedores"
-              hint="Opcional. Acelera o casamento de CNPJ por razão social."
-              file={cadastro}
-              onChange={setCadastro}
-            />
           </div>
+
+          {/* O casamento de CNPJ agora é automático pelo banco de fornecedores. */}
+          <p className="mt-3 flex items-start gap-2 text-xs text-slate-400">
+            <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-jade-500" />
+            <span>
+              Os CNPJ conhecidos são casados automaticamente pelo banco de fornecedores, sem custo. Os pendentes podem ser
+              resolvidos após o processamento.
+            </span>
+          </p>
 
           {processar.error && (
             <Alerta tom="erro" className="mt-5">
@@ -196,12 +197,12 @@ export default function Modulo01() {
             </Alerta>
           )}
 
-          <div className="mt-6 flex items-center gap-3">
+          <div className="mt-6 flex flex-col items-center gap-2">
             <button
               type="button"
-              onClick={() => entradas && processar.mutate({ entradas, cadastro })}
+              onClick={() => entradas && processar.mutate({ entradas })}
               disabled={!entradas || processar.isPending}
-              className="inline-flex items-center gap-2 rounded-xl bg-jade-600 px-5 py-3 text-sm font-600 text-white shadow-lift transition-colors hover:bg-jade-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-jade-600 px-5 py-3 text-sm font-600 text-white shadow-lift transition-colors hover:bg-jade-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
             >
               {processar.isPending ? (
                 <>

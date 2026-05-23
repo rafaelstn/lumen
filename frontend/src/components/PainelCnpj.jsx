@@ -1,9 +1,10 @@
-import { Loader2, Play, Search, CheckCircle2 } from "lucide-react";
+import { Loader2, Play, Search, CheckCircle2, Coins } from "lucide-react";
 import { numero } from "../utils/format.js";
 
-// Painel de enriquecimento de CNPJ: dispara a busca automática por razão social
-// dos fornecedores pendentes. Mostra o resumo retornado pelo backend.
-// Só aparece quando há pendentes. A correção manual segue na tabela.
+// Painel de enriquecimento de CNPJ via API CNPJá (PAGA): dispara a busca
+// automática por razão social dos fornecedores pendentes. Consome créditos.
+// A busca gratuita no banco e a correção manual ficam na tabela.
+// Só aparece quando há pendentes.
 export default function PainelCnpj({ pendentes, resumoEnriquecimento, onEnriquecer, enriquecendo, erro }) {
   if (pendentes <= 0 && !resumoEnriquecimento) return null;
 
@@ -15,12 +16,18 @@ export default function PainelCnpj({ pendentes, resumoEnriquecimento, onEnriquec
             <Search className="h-5 w-5" />
           </span>
           <div>
-            <h2 className="font-display text-lg font-600 text-amber-700">CNPJ pendentes</h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-display text-lg font-600 text-amber-700">Enriquecimento automático</h2>
+              <span className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-100 px-2 py-0.5 text-[0.65rem] font-600 uppercase tracking-wide text-amber-700">
+                <Coins className="h-3 w-3" /> consome créditos
+              </span>
+            </div>
             <p className="mt-0.5 text-sm text-amber-700/80">
               {pendentes > 0 ? (
                 <>
-                  <strong className="tnum font-600">{numero(pendentes)}</strong> fornecedor(es) sem CNPJ casado. A busca
-                  automática consulta a Receita por razão social.
+                  <strong className="tnum font-600">{numero(pendentes)}</strong> fornecedor(es) sem CNPJ casado. Esta busca
+                  consulta a API CNPJá por razão social e <strong className="font-600">consome créditos pagos</strong>. Para
+                  resolver sem custo, use a busca no banco (grátis) na tabela abaixo.
                 </>
               ) : (
                 "Todos os fornecedores pendentes foram processados."
@@ -37,7 +44,7 @@ export default function PainelCnpj({ pendentes, resumoEnriquecimento, onEnriquec
             className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-600 text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
           >
             {enriquecendo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            {enriquecendo ? "Buscando..." : "Buscar CNPJ automaticamente"}
+            {enriquecendo ? "Buscando..." : "Buscar (pago)"}
           </button>
         )}
       </div>

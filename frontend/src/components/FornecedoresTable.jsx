@@ -1,5 +1,16 @@
-import { useMemo, useState } from "react";
-import { AlertTriangle, Check, Pencil, X, ShieldAlert, ShieldCheck, Search } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  AlertTriangle,
+  Check,
+  Pencil,
+  X,
+  ShieldAlert,
+  ShieldCheck,
+  Search,
+  Database,
+  Loader2,
+  CornerDownLeft,
+} from "lucide-react";
 import {
   moeda,
   percentual,
@@ -7,6 +18,7 @@ import {
   statusCndMeta,
   riscoMeta,
 } from "../utils/format.js";
+import { buscarFornecedores } from "../services/api.js";
 
 // Tabela de fornecedores classificados. Linhas de risco ALTO ganham faixa
 // vermelha à esquerda; CNPJ pendente abre edição inline (razão social + CNPJ,
@@ -131,6 +143,28 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
   const risco = riscoMeta(f.risco_2027);
   const riscoAlto = f.risco_2027 === "ALTO";
 
+  // Em edição: a linha vira um painel de resolução de CNPJ ocupando a largura toda,
+  // com a cascata grátis (busca no banco) → manual. Mantém o contexto do fornecedor.
+  if (emEdicao) {
+    return (
+      <tr className="bg-jade-50/40">
+        <td colSpan={8} className="relative px-4 py-4">
+          <span className="absolute inset-y-0 left-0 w-1 bg-jade-500" aria-hidden="true" />
+          <ResolverCnpj
+            f={f}
+            cnpj={cnpj}
+            razao={razao}
+            setCnpj={setCnpj}
+            setRazao={setRazao}
+            salvando={salvando}
+            onSalvar={onSalvar}
+            onCancelar={onCancelar}
+          />
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <tr className={["relative transition-colors hover:bg-slate-50/70", riscoAlto ? "bg-signal-50/40" : ""].join(" ")}>
       {/* Grupo */}
@@ -143,64 +177,29 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
 
       {/* Fornecedor */}
       <td className="px-4 py-3 align-top">
-        {emEdicao ? (
-          <input
-            value={razao}
-            onChange={(e) => setRazao(e.target.value)}
-            placeholder="Razão social"
-            aria-label="Razão social"
-            className="w-full max-w-xs rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-jade-400"
-          />
-        ) : (
-          <div className="flex flex-col gap-1">
-            <span className="font-500 text-ink-800">{f.nome_forn}</span>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {f.verificar_st && (
-                <span className="inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-amber-700">
-                  <AlertTriangle className="h-3 w-3" /> Verificar ST
-                </span>
-              )}
-              {f.tem_estorno && (
-                <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-slate-600">
-                  Estorno
-                </span>
-              )}
-              {!f.cnpj_pendente && !f.cnpj_confirmado && f.cnpj && (
-                <span className="text-[0.65rem] text-slate-400">CNPJ não confirmado</span>
-              )}
-            </div>
+        <div className="flex flex-col gap-1">
+          <span className="font-500 text-ink-800">{f.nome_forn}</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {f.verificar_st && (
+              <span className="inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-amber-700">
+                <AlertTriangle className="h-3 w-3" /> Verificar ST
+              </span>
+            )}
+            {f.tem_estorno && (
+              <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-slate-600">
+                Estorno
+              </span>
+            )}
+            {!f.cnpj_pendente && !f.cnpj_confirmado && f.cnpj && (
+              <span className="text-[0.65rem] text-slate-400">CNPJ não confirmado</span>
+            )}
           </div>
-        )}
+        </div>
       </td>
 
       {/* CNPJ */}
       <td className="px-4 py-3 align-top">
-        {emEdicao ? (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <input
-              value={cnpj}
-              onChange={(e) => setCnpj(e.target.value)}
-              placeholder="00.000.000/0000-00"
-              aria-label="CNPJ"
-              className="tnum w-44 rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-jade-400"
-            />
-            <button
-              type="button"
-              onClick={onSalvar}
-              disabled={salvando}
-              className="inline-flex items-center gap-1 rounded-lg bg-jade-600 px-2.5 py-1.5 text-xs font-500 text-white hover:bg-jade-700 disabled:opacity-40"
-            >
-              <Check className="h-3.5 w-3.5" /> Salvar
-            </button>
-            <button
-              type="button"
-              onClick={onCancelar}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
-            >
-              <X className="h-3.5 w-3.5" /> Cancelar
-            </button>
-          </div>
-        ) : f.cnpj ? (
+        {f.cnpj ? (
           <span className={`tnum inline-flex items-center gap-1.5 ${f.cnpj_confirmado ? "text-jade-700" : "text-slate-600"}`}>
             {f.cnpj_confirmado && <ShieldCheck className="h-3.5 w-3.5" />}
             {f.cnpj}
@@ -211,7 +210,7 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
             onClick={onAbrir}
             className="inline-flex items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2 py-1 text-xs font-500 text-jade-700 hover:border-jade-400 hover:bg-jade-50"
           >
-            <Pencil className="h-3 w-3" /> inserir manualmente
+            <Pencil className="h-3 w-3" /> resolver CNPJ
           </button>
         )}
       </td>
@@ -246,5 +245,204 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
       <td className="tnum px-4 py-3 text-right align-top text-slate-600">{percentual(f.aliquota_max)}</td>
       <td className="tnum px-4 py-3 text-right align-top font-500 text-ink-800">{moeda(f.total_valor_icms)}</td>
     </tr>
+  );
+}
+
+// Painel inline de resolução de CNPJ de um fornecedor pendente.
+// Cascata de opções: (1) buscar no banco de fornecedores — GRÁTIS, clique aplica;
+// (2) inserir manualmente razão social + CNPJ. Salva via definirCnpjManual (no pai).
+function ResolverCnpj({ f, cnpj, razao, setCnpj, setRazao, salvando, onSalvar, onCancelar }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-600 uppercase tracking-wider text-jade-700">Resolver CNPJ</p>
+          <p className="mt-0.5 text-sm font-500 text-ink-800">{f.nome_forn}</p>
+        </div>
+        <button
+          type="button"
+          onClick={onCancelar}
+          className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"
+        >
+          <X className="h-3.5 w-3.5" /> Fechar
+        </button>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-2">
+        {/* OPÇÃO 1 — busca no banco (grátis) */}
+        <BuscaBanco
+          termoInicial={f.nome_forn || ""}
+          onSelecionar={(item) => {
+            setRazao(item.razao_social || f.nome_forn || "");
+            setCnpj(item.cnpj || "");
+          }}
+        />
+
+        {/* OPÇÃO 2 — manual */}
+        <div className="rounded-xl border border-slate-200 bg-white p-3.5">
+          <div className="flex items-center gap-2">
+            <Pencil className="h-4 w-4 text-slate-500" />
+            <span className="text-sm font-600 text-ink-800">Inserir manualmente</span>
+          </div>
+          <div className="mt-3 space-y-2">
+            <label className="block">
+              <span className="mb-1 block text-xs font-500 text-slate-500">Razão social</span>
+              <input
+                value={razao}
+                onChange={(e) => setRazao(e.target.value)}
+                placeholder="Razão social"
+                aria-label="Razão social"
+                className="w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-jade-400"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs font-500 text-slate-500">CNPJ</span>
+              <input
+                value={cnpj}
+                onChange={(e) => setCnpj(e.target.value)}
+                placeholder="00.000.000/0000-00"
+                aria-label="CNPJ"
+                className="tnum w-full rounded-lg border border-slate-300 px-2.5 py-1.5 text-sm focus:border-jade-400"
+              />
+            </label>
+          </div>
+        </div>
+      </div>
+
+      {/* Ação de salvar (vale para ambas as opções, pois ambas preenchem cnpj/razao) */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onSalvar}
+          disabled={salvando || !cnpj.trim()}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-jade-600 px-3.5 py-2 text-sm font-600 text-white transition-colors hover:bg-jade-700 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+          Aplicar CNPJ
+        </button>
+        {!cnpj.trim() && (
+          <span className="text-xs text-slate-400">Selecione no banco ou digite um CNPJ.</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Campo de busca gratuita no banco de fornecedores. Debounce de 350ms,
+// lista sugestões clicáveis. Selo "grátis" reforça que não consome créditos.
+function BuscaBanco({ termoInicial, onSelecionar }) {
+  const [q, setQ] = useState(termoInicial);
+  const [resultados, setResultados] = useState([]);
+  const [carregando, setCarregando] = useState(false);
+  const [erro, setErro] = useState(null);
+  const [escolhido, setEscolhido] = useState(null);
+  const debounceRef = useRef(null);
+
+  useEffect(() => {
+    const termo = q.trim();
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (termo.length < 2) {
+      setResultados([]);
+      setCarregando(false);
+      setErro(null);
+      return;
+    }
+    setCarregando(true);
+    let cancelado = false;
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await buscarFornecedores(termo);
+        if (!cancelado) {
+          setResultados(res ?? []);
+          setErro(null);
+        }
+      } catch {
+        if (!cancelado) {
+          setResultados([]);
+          setErro("Não foi possível buscar no banco agora.");
+        }
+      } finally {
+        if (!cancelado) setCarregando(false);
+      }
+    }, 350);
+    return () => {
+      cancelado = true;
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [q]);
+
+  const termoCurto = q.trim().length > 0 && q.trim().length < 2;
+
+  return (
+    <div className="rounded-xl border border-jade-200 bg-jade-50/50 p-3.5">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <Database className="h-4 w-4 text-jade-600" />
+          <span className="text-sm font-600 text-ink-800">Buscar no banco</span>
+        </div>
+        <span className="rounded-md bg-jade-600 px-2 py-0.5 text-[0.65rem] font-600 uppercase tracking-wide text-white">
+          grátis
+        </span>
+      </div>
+
+      <div className="relative mt-3">
+        <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+        <input
+          type="search"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setEscolhido(null);
+          }}
+          placeholder="Razão social do fornecedor"
+          aria-label="Buscar fornecedor no banco"
+          className="w-full rounded-lg border border-slate-300 py-2 pl-8 pr-3 text-sm placeholder:text-slate-400 focus:border-jade-400"
+        />
+        {carregando && (
+          <Loader2 className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-jade-500" />
+        )}
+      </div>
+
+      <div className="mt-2 max-h-44 overflow-y-auto scroll-thin">
+        {termoCurto && <p className="px-1 py-2 text-xs text-slate-400">Digite ao menos 2 caracteres.</p>}
+        {erro && <p className="px-1 py-2 text-xs text-signal-700">{erro}</p>}
+        {!erro && !carregando && !termoCurto && q.trim().length >= 2 && resultados.length === 0 && (
+          <p className="px-1 py-2 text-xs text-slate-400">Nenhum CNPJ no banco para esse termo. Use a opção manual.</p>
+        )}
+        <ul className="divide-y divide-jade-100">
+          {resultados.map((item) => {
+            const ativo = escolhido === item.cnpj;
+            return (
+              <li key={`${item.cnpj}-${item.razao_social}`}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEscolhido(item.cnpj);
+                    onSelecionar(item);
+                  }}
+                  className={[
+                    "flex w-full items-center justify-between gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
+                    ativo ? "bg-jade-100" : "hover:bg-jade-100/60",
+                  ].join(" ")}
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-500 text-ink-800">{item.razao_social}</span>
+                    <span className="tnum block text-xs text-slate-500">
+                      {item.cnpj}
+                      {item.origem && <span className="ml-1.5 text-slate-400">· {item.origem}</span>}
+                    </span>
+                  </span>
+                  {ativo ? (
+                    <Check className="h-4 w-4 shrink-0 text-jade-600" />
+                  ) : (
+                    <CornerDownLeft className="h-3.5 w-3.5 shrink-0 text-slate-300" />
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
   );
 }
