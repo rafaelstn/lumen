@@ -1,64 +1,57 @@
-import { ShieldCheck } from "lucide-react";
+import { useState } from "react";
+import { Menu } from "lucide-react";
+import Sidebar from "./components/Sidebar.jsx";
 import Modulo01 from "./pages/Modulo01.jsx";
+import BancoFornecedores from "./pages/BancoFornecedores.jsx";
 
+// Título contextual da topbar conforme a view ativa.
+const TITULOS = {
+  analise: "Análise de Crédito",
+  fornecedores: "Banco de fornecedores",
+};
+
+// Shell de dashboard: sidebar fixa (drawer no mobile) + área de conteúdo.
+// A navegação usa estado local de "view ativa" — sem router, são poucas views.
 export default function App() {
+  const [view, setView] = useState("analise");
+  const [menuAberto, setMenuAberto] = useState(false);
+
+  function navegar(novaView) {
+    setView(novaView);
+    setMenuAberto(false); // fecha o drawer ao escolher no mobile
+  }
+
   return (
     <div className="min-h-screen bg-[#f4f6f5] text-ink-800">
-      <header className="relative overflow-hidden bg-ink-950 text-white">
-        <div className="absolute inset-0 reticle" aria-hidden="true" />
-        <div className="absolute inset-0 noise" aria-hidden="true" />
-        {/* Halo esmeralda no canto: assinatura de "lente / luz" do Lumen */}
-        <div
-          className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full bg-jade-500/20 blur-3xl"
-          aria-hidden="true"
-        />
-        <div className="relative mx-auto flex max-w-7xl flex-col gap-4 px-5 py-6 sm:flex-row sm:items-center sm:justify-between sm:px-8 sm:py-7">
-          <div className="flex items-center gap-3.5">
-            <LumenMark />
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="font-display text-2xl font-600 leading-none tracking-tight">
-                  Lumen
-                </span>
-                <span className="hidden text-xs font-500 uppercase tracking-[0.18em] text-jade-400 sm:inline">
-                  Fiscal
-                </span>
-              </div>
-              <p className="mt-1 text-xs text-ink-600/90 sm:text-sm">
-                Análise de crédito de ICMS e regularidade fiscal de fornecedores
-              </p>
-            </div>
-          </div>
-          <span className="inline-flex w-fit items-center gap-1.5 rounded-full border border-jade-500/30 bg-jade-500/10 px-3 py-1.5 text-xs font-500 text-jade-400">
-            <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2.2} />
-            Documento confidencial
-          </span>
-        </div>
-      </header>
+      <Sidebar
+        view={view}
+        onNavegar={navegar}
+        aberto={menuAberto}
+        onFechar={() => setMenuAberto(false)}
+      />
 
-      <main className="mx-auto max-w-7xl px-4 py-7 sm:px-8 sm:py-10">
-        <Modulo01 />
-      </main>
+      {/* Coluna de conteúdo: deslocada pela sidebar fixa em desktop */}
+      <div className="lg:pl-72">
+        {/* Topbar: só hambúrguer + título no mobile; em desktop fica enxuta */}
+        <header className="sticky top-0 z-20 flex items-center gap-3 border-b border-slate-200 bg-[#f4f6f5]/85 px-4 py-3.5 backdrop-blur sm:px-6 lg:px-8">
+          <button
+            type="button"
+            onClick={() => setMenuAberto(true)}
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-ink-700 transition-colors hover:bg-slate-50 lg:hidden"
+            aria-label="Abrir menu"
+          >
+            <Menu className="h-[18px] w-[18px]" />
+          </button>
+          <h1 className="font-display text-base font-600 tracking-tight text-ink-900 sm:text-lg">
+            {TITULOS[view]}
+          </h1>
+        </header>
 
-      <footer className="mx-auto max-w-7xl px-4 pb-10 pt-2 text-center text-xs text-ink-600/60 sm:px-8">
-        Lumen · Módulo 01 — Crédito de ICMS &amp; Regularidade Fiscal
-      </footer>
+        <main className="mx-auto max-w-7xl px-4 py-7 sm:px-6 sm:py-9 lg:px-8 lg:py-10">
+          {view === "analise" && <Modulo01 />}
+          {view === "fornecedores" && <BancoFornecedores />}
+        </main>
+      </div>
     </div>
-  );
-}
-
-// Marca: um glifo de "lente" — anel com núcleo luminoso. Vetorial, leve, distintivo.
-function LumenMark() {
-  return (
-    <span
-      className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-jade-500 to-jade-700 shadow-lift ring-1 ring-white/10"
-      aria-hidden="true"
-    >
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-        <circle cx="12" cy="12" r="8.5" stroke="white" strokeOpacity="0.85" strokeWidth="1.6" />
-        <circle cx="12" cy="12" r="3.4" fill="white" />
-        <path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3" stroke="white" strokeOpacity="0.6" strokeWidth="1.4" strokeLinecap="round" />
-      </svg>
-    </span>
   );
 }
