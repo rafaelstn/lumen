@@ -63,3 +63,43 @@ class CnpjManualIn(BaseModel):
     cod_forn: str
     cnpj: str
     razao_social: str | None = None
+
+
+class AnaliseHistoricoItem(BaseModel):
+    """Item leve do histórico (sem o payload de fornecedores)."""
+
+    id: str
+    cliente: str | None = None
+    cnpj_cliente: str | None = None
+    periodo: str | None = None
+    total_fornecedores: int = 0
+    criado_em: str | None = None
+    atualizado_em: str | None = None
+
+
+class AnalisesHistoricoResponse(BaseModel):
+    analises: list[AnaliseHistoricoItem]
+
+
+class FornecedorGlobalItem(BaseModel):
+    """Item da listagem global de fornecedores. NUNCA inclui sócios (LGPD)."""
+
+    cnpj: str
+    razao_social: str
+    nome_fantasia: str | None = None
+    municipio: str | None = None
+    uf: str | None = None
+    cnae_principal_descricao: str | None = None
+    situacao_cadastral: str | None = None
+    telefone_principal: str | None = None
+    email_principal: str | None = None
+    cadastro_atualizado_em: str | None = None
+    cnd_ultima_consulta: str | None = None
+    cnd_status_cache: str | None = None
+
+
+class FornecedoresGlobaisResponse(BaseModel):
+    total: int
+    offset: int
+    limit: int
+    resultados: list[FornecedorGlobalItem]

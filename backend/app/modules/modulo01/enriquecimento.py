@@ -20,13 +20,31 @@ import httpx
 
 from app.config import settings
 from app.database import async_session_factory
-from app.modules.modulo01 import budget, cnpj_lookup, fornecedores_repo
+from app.modules.modulo01 import analises_repo, budget, cnpj_lookup, fornecedores_repo
 from app.modules.modulo01.jobs import store
 
 logger = logging.getLogger("modulo01.enriquecimento")
 
 # Referências de tasks em andamento (evita coleta pelo GC).
 _tasks: set[asyncio.Task] = set()
+
+
+async def _sincronizar_historico(job_id: str) -> None:
+    """Atualiza a Analise do histórico com o estado atual do job. Tolerante a falha.
+
+    Chamado ao fim do lote para o histórico refletir os CNPJ casados. Falha de banco não
+    afeta o lote (o estado essencial já está no JobStore).
+    """
+    job = store.obter(job_id)
+    if job is None:
+        return
+    try:
+        async with async_session_factory() as session:
+            await analises_repo.salvar(session, job_id, job)
+    except Exception:
+        logger.warning(
+            "Enriquecimento: não foi possível sincronizar o histórico (job %s).", job_id[:8], exc_info=True
+        )
 
 
 def _progresso_inicial(total: int) -> dict:
@@ -175,6 +193,9 @@ async def _processar(job_id: str, pendentes: list[tuple[str, str]]) -> None:
     store.mutar(job_id, _finalizar)
 
     await _persistir(job_id, achados, consumidos)
+
+    # Mantém o histórico em sincronia com o estado pós-enriquecimento (CNPJ casados).
+    await _sincronizar_historico(job_id)
 
 
 async def _persistir(job_id: str, achados: dict, consumidos: int) -> None:

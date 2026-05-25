@@ -16,10 +16,28 @@ import httpx
 
 from app.config import settings
 from app.database import async_session_factory
-from app.modules.modulo01 import budget, fornecedores_repo
+from app.modules.modulo01 import analises_repo, budget, fornecedores_repo
 from app.modules.modulo01.jobs import store
 
 logger = logging.getLogger("modulo01.cnd")
+
+
+async def _sincronizar_historico(job_id: str) -> None:
+    """Atualiza a Analise do histórico com o estado pós-CND/risco. Tolerante a falha.
+
+    Chamado ao fim do lote para o histórico refletir CND e risco 2027. Falha de banco não
+    afeta o lote (o estado essencial já está no JobStore).
+    """
+    job = store.obter(job_id)
+    if job is None:
+        return
+    try:
+        async with async_session_factory() as session:
+            await analises_repo.salvar(session, job_id, job)
+    except Exception:
+        logger.warning(
+            "CND: não foi possível sincronizar o histórico (job %s).", job_id[:8], exc_info=True
+        )
 
 # Status de regularidade fiscal.
 NEGATIVA = "NEGATIVA"                                   # sem débitos — regular
@@ -208,3 +226,6 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
         )
     except Exception:
         logger.warning("CND: falha ao registrar consumo do lote (job %s).", job_id[:8], exc_info=True)
+
+    # Mantém o histórico em sincronia com o estado pós-CND/risco.
+    await _sincronizar_historico(job_id)

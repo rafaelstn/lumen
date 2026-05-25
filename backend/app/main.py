@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     # indisponível, loga e segue (recursos que dependem do banco apenas não funcionam).
     try:
         from app.database import async_session_factory, engine
-        from app.models import escritorio, fornecedor  # noqa: F401 — registra no metadata
+        from app.models import analise, escritorio, fornecedor  # noqa: F401 — registra no metadata
         from app.models.base import Base
         from app.models.escritorio import Escritorio
         from app.modules.consumo import models as _consumo  # noqa: F401 — registra no metadata
@@ -86,7 +86,7 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins_list,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["*"],
 )
 

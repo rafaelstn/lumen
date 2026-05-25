@@ -15,6 +15,7 @@ from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFil
 from app.config import settings
 from app.database import async_session_factory
 from app.modules.modulo01 import (
+    analises_repo,
     budget,
     cnd,
     cnpj_lookup,
@@ -75,8 +76,31 @@ async def _registrar_aliases(itens: list[tuple[str, str]]) -> None:
                 await fornecedores_repo.registrar_alias(session, nome_entrada, cnpj)
     except Exception:
         logger.warning("Não foi possível registrar alias(es) de fornecedor.", exc_info=True)
+async def _persistir_analise(analise_id: str) -> None:
+    """Salva/atualiza a análise no histórico a partir do estado atual do job. Tolerante a falha.
+
+    Lê o job do store (cópia) e faz upsert idempotente por id. Falha de banco não derruba a
+    operação principal (processar/enriquecer/CND): o estado vive no JobStore em memória.
+    """
+    job = store.obter(analise_id)
+    if job is None:
+        return
+    try:
+        async with async_session_factory() as session:
+            await analises_repo.salvar(session, analise_id, job)
+    except Exception:
+        logger.warning("Histórico de análise indisponível (não foi possível salvar).", exc_info=True)
+
+
 from app.modules.modulo01.parser import ParserError
-from app.modules.modulo01.schemas import CnpjManualIn, ProcessarResponse
+from app.modules.modulo01.schemas import (
+    AnaliseHistoricoItem,
+    AnalisesHistoricoResponse,
+    CnpjManualIn,
+    FornecedorGlobalItem,
+    FornecedoresGlobaisResponse,
+    ProcessarResponse,
+)
 from app.ratelimit import limiter
 
 router = APIRouter()
@@ -170,6 +194,9 @@ async def processar(
             "fornecedores": fornecedores,
         }
     )
+
+    # Persiste no histórico para reabrir sem re-subir a planilha (id estável = job_id).
+    await _persistir_analise(job_id)
 
     return ProcessarResponse(
         job_id=job_id, status="parsed", metadados=metadados, resumo=resumo, fornecedores=fornecedores
@@ -370,6 +397,8 @@ async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
     # também a nova grafia), para a re-análise casar de graça por qualquer uma delas.
     aliases = {nome_entrada_original, final["nome_forn"]}
     await _registrar_aliases([(nome, cnpj) for nome in aliases if nome])
+    # Reflete a correção manual no histórico (CNPJ confirmado / risco reaplicado).
+    await _persistir_analise(job_id)
     return final
 
 
@@ -391,6 +420,144 @@ async def buscar_fornecedores(request: Request, q: str = ""):
             {"cnpj": f.cnpj, "razao_social": f.razao_social, "origem": f.origem} for f in forns
         ]
     }
+
+
+def _iso(dt) -> str | None:
+    return dt.isoformat() if dt else None
+
+
+@router.get("/analises", response_model=AnalisesHistoricoResponse)
+@limiter.limit("60/minute")
+async def listar_analises(request: Request):
+    """Histórico de análises do escritório (acesso rápido para reabrir sem re-subir a planilha).
+
+    Lista leve (sem o payload de fornecedores), ordenada por mais recente. Tolerante: se o banco
+    estiver indisponível, devolve 503 (o histórico é uma conveniência, não derruba o M01).
+    """
+    try:
+        async with async_session_factory() as session:
+            analises = await analises_repo.listar(session, settings.escritorio_default_id)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Histórico temporariamente indisponível.")
+    return AnalisesHistoricoResponse(
+        analises=[
+            AnaliseHistoricoItem(
+                id=a.id,
+                cliente=a.cliente,
+                cnpj_cliente=a.cnpj_cliente,
+                periodo=a.periodo,
+                total_fornecedores=a.total_fornecedores,
+                criado_em=_iso(a.criado_em),
+                atualizado_em=_iso(a.atualizado_em),
+            )
+            for a in analises
+        ]
+    )
+
+
+@router.get("/analise/{analise_id}", response_model=ProcessarResponse)
+@limiter.limit("60/minute")
+async def reabrir_analise(request: Request, analise_id: str):
+    """Reabre uma análise do histórico: devolve o estado completo e RE-HIDRATA o job no store.
+
+    Mesmo shape de /resultado/{job_id}. Re-hidratação: se o job ainda vive no store (TTL não
+    expirou), usa esse estado (pode estar mais à frente, ex.: enriquecimento em andamento); se
+    expirou, recria o job no store a partir do `dados` da Analise, com o MESMO job_id. Assim o
+    frontend continua enriquecimento/CND/relatório de onde parou, sem re-subir a planilha.
+    """
+    job = store.obter(analise_id)
+    if job is None:
+        try:
+            async with async_session_factory() as session:
+                analise = await analises_repo.obter(
+                    session, analise_id, settings.escritorio_default_id
+                )
+        except Exception:
+            raise HTTPException(status_code=503, detail="Histórico temporariamente indisponível.")
+        if analise is None:
+            raise HTTPException(status_code=404, detail="Análise não encontrada.")
+        dados = analise.dados or {}
+        store.criar_com_id(
+            analise_id,
+            {
+                "status": "parsed",
+                "metadados": dados.get("metadados", {}),
+                "resumo": dados.get("resumo", {}),
+                "fornecedores": dados.get("fornecedores", []),
+            },
+        )
+        job = store.obter(analise_id)
+
+    fornecedores = job["fornecedores"]
+    resumo = dict(job.get("resumo", {}))
+    resumo["cnpj_pendentes"] = sum(1 for f in fornecedores if not f.get("cnpj"))
+    resumo["cnpj_casados"] = sum(1 for f in fornecedores if f.get("cnpj"))
+    return ProcessarResponse(
+        job_id=analise_id,
+        status=job.get("status", "parsed"),
+        metadados=job.get("metadados", {}),
+        resumo=resumo,
+        fornecedores=fornecedores,
+    )
+
+
+@router.delete("/analise/{analise_id}")
+@limiter.limit("60/minute")
+async def apagar_analise(request: Request, analise_id: str):
+    """Apaga uma análise do histórico (e remove o job do store, se ainda existir)."""
+    try:
+        async with async_session_factory() as session:
+            removida = await analises_repo.apagar(
+                session, analise_id, settings.escritorio_default_id
+            )
+    except Exception:
+        raise HTTPException(status_code=503, detail="Histórico temporariamente indisponível.")
+    if not removida:
+        raise HTTPException(status_code=404, detail="Análise não encontrada.")
+    store.remover(analise_id)
+    return {"id": analise_id, "status": "removida"}
+
+
+@router.get("/fornecedores", response_model=FornecedoresGlobaisResponse)
+@limiter.limit("60/minute")
+async def listar_fornecedores_global(
+    request: Request, offset: int = 0, limit: int = 50, q: str = ""
+):
+    """Listagem global e paginada de TODOS os fornecedores do cache (visão global, todos clientes).
+
+    O banco de fornecedores é compartilhado (sem escritorio_id). `q` filtra por nome ou CNPJ.
+    NUNCA inclui sócios (LGPD): o quadro societário só sai no detalhe /fornecedor/{cnpj}.
+    Limite máximo por página (anti-abuso): 100. offset/limit saneados.
+    """
+    offset = max(0, offset)
+    limit = max(1, min(limit, 100))
+    try:
+        async with async_session_factory() as session:
+            forns, total = await fornecedores_repo.listar_paginado(session, offset, limit, q)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Listagem de fornecedores temporariamente indisponível.")
+    return FornecedoresGlobaisResponse(
+        total=total,
+        offset=offset,
+        limit=limit,
+        resultados=[
+            FornecedorGlobalItem(
+                cnpj=f.cnpj,
+                razao_social=f.razao_social,
+                nome_fantasia=f.nome_fantasia,
+                municipio=f.municipio,
+                uf=f.uf,
+                cnae_principal_descricao=f.cnae_principal_descricao,
+                situacao_cadastral=f.situacao_cadastral,
+                telefone_principal=f.telefone_principal,
+                email_principal=f.email_principal,
+                cadastro_atualizado_em=_iso(f.cadastro_atualizado_em),
+                cnd_ultima_consulta=_iso(f.cnd_ultima_consulta),
+                cnd_status_cache=f.cnd_ultimo_status,
+            )
+            for f in forns
+        ],
+    )
 
 
 @router.get("/fornecedor/{cnpj}")

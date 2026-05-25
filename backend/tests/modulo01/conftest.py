@@ -11,6 +11,7 @@ import pytest_asyncio
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.models.base import Base
+from app.models import analise as _analise  # noqa: F401 — registra no metadata
 from app.models import fornecedor as _fornecedor  # noqa: F401 — registra no metadata
 
 _DEFAULT = os.path.join(os.path.dirname(__file__), "..", "fixtures", "idesan.xls")

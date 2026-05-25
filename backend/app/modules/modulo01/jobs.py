@@ -53,6 +53,24 @@ class JobStore:
             self._criado_mono[job_id] = time.monotonic()
         return job_id
 
+    def criar_com_id(self, job_id: str, dados: dict[str, Any]) -> None:
+        """Cria/re-hidrata um job com id específico (reabrir uma análise do histórico).
+
+        Idempotente: se o job já existe no store, NÃO sobrescreve (preserva o estado vivo, que
+        pode estar mais à frente que o histórico, ex.: enriquecimento em andamento). Renova o TTL.
+        """
+        with self._lock:
+            self._expurgar()
+            if job_id in self._jobs:
+                self._criado_mono[job_id] = time.monotonic()
+                return
+            self._jobs[job_id] = {
+                "job_id": job_id,
+                "criado_em": datetime.now(timezone.utc).isoformat(),
+                **dados,
+            }
+            self._criado_mono[job_id] = time.monotonic()
+
     def obter(self, job_id: str) -> dict[str, Any] | None:
         """Devolve uma cópia profunda do job (isola o leitor de escritas concorrentes)."""
         with self._lock:
@@ -62,6 +80,13 @@ class JobStore:
     def existe(self, job_id: str) -> bool:
         with self._lock:
             return job_id in self._jobs
+
+    def remover(self, job_id: str) -> bool:
+        """Remove um job do store. Devolve True se removeu. Usado ao apagar do histórico."""
+        with self._lock:
+            existia = self._jobs.pop(job_id, None) is not None
+            self._criado_mono.pop(job_id, None)
+            return existia
 
     def atualizar(self, job_id: str, **campos: Any) -> bool:
         with self._lock:

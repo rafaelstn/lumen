@@ -5,7 +5,7 @@ sem reconsultar API paga. Toda operação é tolerante (o chamador trata indispo
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fornecedor import Fornecedor, FornecedorAlias, FornecedorSocio
@@ -93,6 +93,50 @@ async def buscar(session: AsyncSession, q: str, limite: int = 10) -> list[Fornec
         select(Fornecedor).where(Fornecedor.nome_normalizado.ilike(f"%{norm}%")).limit(limite)
     )
     return list(res.scalars())
+
+
+async def listar_paginado(
+    session: AsyncSession, offset: int, limite: int, q: str = ""
+) -> tuple[list[Fornecedor], int]:
+    """Lista paginada de TODOS os fornecedores do cache global (visão global do Rafael).
+
+    `q` filtra por razão social (nome normalizado) OU por dígitos de CNPJ. Devolve (linhas, total),
+    onde total é a contagem do mesmo filtro (para a paginação do frontend). NÃO toca em sócios
+    (dado pessoal de terceiros, LGPD): o quadro societário só sai no detalhe sob demanda.
+
+    Ordena por cadastro mais recente primeiro (cadastro_atualizado_em desc, depois id desc) para
+    o que foi pesquisado por último aparecer no topo.
+    """
+    filtros = []
+    termo = (q or "").strip()
+    if termo:
+        norm = _normalizar(termo)
+        digitos = "".join(c for c in termo if c.isdigit())
+        ors = []
+        if norm:
+            ors.append(Fornecedor.nome_normalizado.ilike(f"%{norm}%"))
+        if digitos:
+            ors.append(Fornecedor.cnpj.ilike(f"%{digitos}%"))
+        if ors:
+            from sqlalchemy import or_
+
+            filtros.append(or_(*ors))
+
+    base = select(Fornecedor)
+    cont = select(func.count()).select_from(Fornecedor)
+    for f in filtros:
+        base = base.where(f)
+        cont = cont.where(f)
+
+    total = (await session.execute(cont)).scalar_one()
+    res = await session.execute(
+        base.order_by(
+            Fornecedor.cadastro_atualizado_em.desc().nullslast(), Fornecedor.id.desc()
+        )
+        .offset(offset)
+        .limit(limite)
+    )
+    return list(res.scalars()), int(total)
 
 
 async def registrar_cnd(
