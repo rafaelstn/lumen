@@ -8,6 +8,7 @@ export default function ConfirmacaoCusto({
   quantidade,
   custoUnitarioCent,
   descricao,
+  aviso,
   processando = false,
   onConfirmar,
   onCancelar,
@@ -26,6 +27,12 @@ export default function ConfirmacaoCusto({
       role="alertdialog"
       aria-label="Confirmar custo da consulta"
     >
+      {aviso && (
+        <p className="mb-3 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+          <span>{aviso}</span>
+        </p>
+      )}
       <p className="flex items-start gap-2 text-sm text-ink-800">
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-jade-600" />
         <span>

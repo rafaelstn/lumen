@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, Play, Search, CheckCircle2, Coins, Clock } from "lucide-react";
+import { Loader2, Play, Search, CheckCircle2, Coins, Clock, RotateCcw } from "lucide-react";
 import { numero, moeda } from "../utils/format.js";
 import ConfirmacaoCusto from "./ConfirmacaoCusto.jsx";
 import ProgressBar from "./ProgressBar.jsx";
@@ -10,29 +10,51 @@ import ProgressBar from "./ProgressBar.jsx";
 // enquanto roda exibe uma barra de progresso com parciais; ao concluir, o resumo.
 // A busca gratuita no banco e a correção manual ficam na tabela.
 // Só aparece quando há pendentes ou quando já houve uma busca (progresso presente).
+//
+// Os pendentes vêm separados em NOVOS (nunca pesquisados) e JÁ TENTADOS (já
+// consultados sem sucesso). Por padrão só os NOVOS são buscados; os já-tentados
+// só com a ação secundária (forçar), porque re-consultar gasta crédito à toa a
+// menos que a base tenha mudado (ex: subiu um arquivo novo).
 export default function PainelCnpj({
   pendentes,
+  pendentesDetalhe,
+  carregandoPendentes = false,
   progresso,
   onEnriquecer,
   enriquecendo,
   erro,
   custoCadastroCent = 0,
 }) {
-  const [confirmando, setConfirmando] = useState(false);
+  // confirmando: null | "novos" | "forcar". Define qual confirmação está aberta.
+  const [confirmando, setConfirmando] = useState(null);
   if (pendentes <= 0 && !progresso) return null;
 
   const rodando = progresso?.status === "em_andamento";
   const concluido = progresso?.status === "concluido";
 
-  // custoCadastroCent pode ser fracionário (preço derivado do backend): preserva
-  // a fração na multiplicação e arredonda só no total exibido.
-  const totalCent = Math.round(
-    Math.max(0, Math.trunc(pendentes || 0)) * Math.max(0, Number(custoCadastroCent) || 0),
-  );
+  // Quebra dos pendentes. Enquanto o detalhe não chegou, cai no total agregado
+  // (tudo conta como "novo") para não travar o fluxo nem o custo.
+  const detalheOk = !carregandoPendentes && pendentesDetalhe != null;
+  const novos = detalheOk ? Math.max(0, Math.trunc(pendentesDetalhe.novos || 0)) : Math.max(0, Math.trunc(pendentes || 0));
+  const jaTentados = detalheOk ? Math.max(0, Math.trunc(pendentesDetalhe.ja_tentados || 0)) : 0;
 
-  function confirmar() {
-    setConfirmando(false);
-    onEnriquecer();
+  const unitExato = Math.max(0, Number(custoCadastroCent) || 0);
+  // Custo do botão principal: só os NOVOS. Custo do forçar: novos + já-tentados
+  // (o forçar re-inclui os já-tentados sem deixar os novos de fora).
+  const totalNovosCent = Math.round(novos * unitExato);
+  const qtdForcar = novos + jaTentados;
+
+  const semNovos = detalheOk && novos === 0;
+  const temJaTentados = detalheOk && jaTentados > 0;
+
+  function confirmarNovos() {
+    setConfirmando(null);
+    onEnriquecer({ forcar: false });
+  }
+
+  function confirmarForcar() {
+    setConfirmando(null);
+    onEnriquecer({ forcar: true });
   }
 
   return (
@@ -53,12 +75,15 @@ export default function PainelCnpj({
               {rodando ? (
                 "Buscando os CNPJ pendentes na base cadastral oficial. Você pode acompanhar o andamento abaixo."
               ) : pendentes > 0 ? (
-                <>
-                  <strong className="tnum font-600">{numero(pendentes)}</strong> fornecedor(es) sem CNPJ casado. Esta busca
-                  consulta a base cadastral oficial por razão social e <strong className="font-600">consome créditos pagos</strong>{" "}
-                  (≈ <strong className="tnum font-600">{moeda(totalCent / 100)}</strong> no total). Para
-                  resolver sem custo, use a busca no banco (grátis) na tabela abaixo.
-                </>
+                <DescricaoPendentes
+                  carregando={carregandoPendentes && pendentesDetalhe == null}
+                  detalheOk={detalheOk}
+                  pendentes={pendentes}
+                  novos={novos}
+                  jaTentados={jaTentados}
+                  totalNovosCent={totalNovosCent}
+                  semNovos={semNovos}
+                />
               ) : (
                 "Todos os fornecedores pendentes foram processados."
               )}
@@ -69,11 +94,12 @@ export default function PainelCnpj({
         {pendentes > 0 && !confirmando && !rodando && (
           <button
             type="button"
-            onClick={() => setConfirmando(true)}
-            disabled={enriquecendo}
+            onClick={() => setConfirmando("novos")}
+            disabled={enriquecendo || carregandoPendentes || semNovos}
             className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-600 text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+            title={semNovos ? "Todos os pendentes já foram pesquisados sem sucesso" : undefined}
           >
-            <Play className="h-4 w-4" />
+            {carregandoPendentes ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
             Buscar (pago)
           </button>
         )}
@@ -85,16 +111,53 @@ export default function PainelCnpj({
         )}
       </div>
 
-      {pendentes > 0 && confirmando && !rodando && (
+      {/* Confirmação do fluxo principal: custo sobre os NOVOS apenas */}
+      {pendentes > 0 && confirmando === "novos" && !rodando && (
         <div className="mt-4">
           <ConfirmacaoCusto
-            quantidade={pendentes}
+            quantidade={novos}
             custoUnitarioCent={custoCadastroCent}
             descricao="Busca de CNPJ"
             processando={enriquecendo}
-            onConfirmar={confirmar}
-            onCancelar={() => setConfirmando(false)}
+            onConfirmar={confirmarNovos}
+            onCancelar={() => setConfirmando(null)}
           />
+        </div>
+      )}
+
+      {/* Confirmação do forçar: aviso explícito de re-consulta dos já-tentados */}
+      {pendentes > 0 && confirmando === "forcar" && !rodando && (
+        <div className="mt-4">
+          <ConfirmacaoCusto
+            quantidade={qtdForcar}
+            custoUnitarioCent={custoCadastroCent}
+            descricao="Nova tentativa de busca de CNPJ"
+            aviso={
+              `${numero(jaTentados)} desses fornecedores já foram pesquisados antes e não foram encontrados. ` +
+              `Refazer consome crédito de novo e só vale a pena se a base mudou (ex: você subiu um arquivo novo). ` +
+              (novos > 0
+                ? `Esta ação busca os ${numero(jaTentados)} já-pesquisados mais os ${numero(novos)} novos.`
+                : `Esta ação re-busca os ${numero(jaTentados)} já-pesquisados.`)
+            }
+            processando={enriquecendo}
+            onConfirmar={confirmarForcar}
+            onCancelar={() => setConfirmando(null)}
+          />
+        </div>
+      )}
+
+      {/* Ação secundária discreta: só quando há já-tentados e nada está em curso */}
+      {temJaTentados && !confirmando && !rodando && (
+        <div className="mt-3">
+          <button
+            type="button"
+            onClick={() => setConfirmando("forcar")}
+            disabled={enriquecendo}
+            className="inline-flex items-center gap-1.5 rounded-lg text-xs font-500 text-amber-700 underline-offset-2 transition-colors hover:underline disabled:opacity-50"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+            Tentar de novo os {numero(jaTentados)} já pesquisados
+          </button>
         </div>
       )}
 
@@ -173,6 +236,52 @@ export default function PainelCnpj({
         </p>
       )}
     </section>
+  );
+}
+
+// Texto descritivo dos pendentes, sensível ao estado: carregando, com já-tentados,
+// sem novos (tudo já tentado) ou caso simples (só novos).
+function DescricaoPendentes({ carregando, detalheOk, pendentes, novos, jaTentados, totalNovosCent, semNovos }) {
+  if (carregando) {
+    return (
+      <>
+        <strong className="tnum font-600">{numero(pendentes)}</strong> fornecedor(es) sem CNPJ casado. Verificando quais
+        ainda não foram pesquisados...
+      </>
+    );
+  }
+
+  if (detalheOk && semNovos) {
+    return (
+      <>
+        Os <strong className="tnum font-600">{numero(jaTentados)}</strong> fornecedores pendentes já foram pesquisados antes
+        e não foram encontrados, então não serão buscados de novo (para não gastar crédito à toa). Se você subiu um arquivo
+        novo, use "Tentar de novo os já pesquisados" abaixo. Você também pode corrigir o CNPJ manualmente na tabela.
+      </>
+    );
+  }
+
+  if (detalheOk && jaTentados > 0) {
+    return (
+      <>
+        <strong className="tnum font-600">{numero(pendentes)}</strong> sem CNPJ:{" "}
+        <strong className="tnum font-600">{numero(novos)}</strong> novos e{" "}
+        <strong className="tnum font-600">{numero(jaTentados)}</strong> já pesquisados antes sem sucesso (não serão buscados
+        de novo). A busca consulta a base cadastral oficial por razão social e{" "}
+        <strong className="font-600">consome créditos pagos</strong> (≈{" "}
+        <strong className="tnum font-600">{moeda(totalNovosCent / 100)}</strong> pelos {numero(novos)} novos).
+      </>
+    );
+  }
+
+  // Caso simples: todos os pendentes são novos (sem já-tentados).
+  return (
+    <>
+      <strong className="tnum font-600">{numero(novos)}</strong> fornecedor(es) sem CNPJ casado. Esta busca consulta a base
+      cadastral oficial por razão social e <strong className="font-600">consome créditos pagos</strong> (≈{" "}
+      <strong className="tnum font-600">{moeda(totalNovosCent / 100)}</strong> no total). Para resolver sem custo, use a
+      busca no banco (grátis) na tabela abaixo.
+    </>
   );
 }
 

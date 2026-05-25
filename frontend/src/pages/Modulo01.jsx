@@ -20,6 +20,7 @@ import {
   processarArquivos,
   definirCnpjManual,
   enriquecerCnpj,
+  consultarPendentesEnriquecimento,
   consultarCnd,
   consultarProgresso,
   consultarProgressoEnriquecimento,
@@ -76,6 +77,13 @@ export default function Modulo01() {
   const [erroEnriquecimento, setErroEnriquecimento] = useState(null);
   const pollEnriqRef = useRef(null);
 
+  // Quebra dos pendentes do enriquecimento: { total_pendentes, novos, ja_tentados }.
+  // novos = nunca pesquisados; ja_tentados = já consultados sem sucesso (não
+  // re-pesquisados por padrão). Não consome crédito. Usado pelo PainelCnpj para
+  // dimensionar custo (só os novos no fluxo normal) e liberar a ação de forçar.
+  const [pendentesEnriq, setPendentesEnriq] = useState(null);
+  const [carregandoPendentesEnriq, setCarregandoPendentesEnriq] = useState(false);
+
   // Custos unitários efetivos: preço do backend (recarga) quando há saldo
   // configurado, senão o do localStorage. Fonte da verdade do preço = backend.
   const custos = useCustosEfetivos();
@@ -122,7 +130,7 @@ export default function Modulo01() {
   });
 
   const enriquecer = useMutation({
-    mutationFn: () => enriquecerCnpj(resultado.job_id),
+    mutationFn: ({ forcar = false } = {}) => enriquecerCnpj(resultado.job_id, { forcar }),
     onMutate: () => {
       setErroEnriquecimento(null);
       // Estado inicial otimista para a barra aparecer já no disparo.
@@ -187,6 +195,20 @@ export default function Modulo01() {
       setResultado(atualizado);
     } catch {
       /* mantém o estado atual se a releitura falhar */
+    }
+  }
+
+  // Rebusca a quebra dos pendentes (novos vs já-tentados). Gratuito. Tolera falha:
+  // se o endpoint não responder, o painel cai no comportamento agregado (tudo novo).
+  async function recarregarPendentesEnriq(jobId) {
+    setCarregandoPendentesEnriq(true);
+    try {
+      const d = await consultarPendentesEnriquecimento(jobId);
+      setPendentesEnriq(d);
+    } catch {
+      setPendentesEnriq(null);
+    } finally {
+      setCarregandoPendentesEnriq(false);
     }
   }
 
@@ -278,6 +300,22 @@ export default function Modulo01() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultado?.job_id]);
+
+  // Rebusca a quebra novos/já-tentados sempre que o número de pendentes mudar e
+  // nada estiver em andamento. Reage ao casamento manual (que reduz pendentes) e
+  // ao fim do enriquecimento (status passa a "concluido"). Sem pendentes, zera.
+  const pendentesCount = resultado?.resumo?.cnpj_pendentes ?? 0;
+  useEffect(() => {
+    const jobId = resultado?.job_id;
+    if (!jobId) return;
+    if (pendentesCount <= 0) {
+      setPendentesEnriq(null);
+      return;
+    }
+    if (progressoEnriquecimento?.status === "em_andamento") return;
+    recarregarPendentesEnriq(jobId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultado?.job_id, pendentesCount, progressoEnriquecimento?.status]);
 
   const detalheErro =
     processar.error?.response?.data?.detail ??
@@ -462,8 +500,10 @@ export default function Modulo01() {
 
       <PainelCnpj
         pendentes={r.cnpj_pendentes}
+        pendentesDetalhe={pendentesEnriq}
+        carregandoPendentes={carregandoPendentesEnriq}
         progresso={progressoEnriquecimento}
-        onEnriquecer={() => enriquecer.mutate()}
+        onEnriquecer={({ forcar } = {}) => enriquecer.mutate({ forcar })}
         enriquecendo={enriquecer.isPending || progressoEnriquecimento?.status === "em_andamento"}
         erro={erroEnriquecimento}
         custoCadastroCent={custos.cadastroCent}

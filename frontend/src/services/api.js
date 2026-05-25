@@ -144,12 +144,27 @@ export async function definirCnpjManual(jobId, { cod_forn, cnpj, razao_social })
   return data;
 }
 
+// Pendentes do enriquecimento de CNPJ, separados por estado de tentativa.
+// { total_pendentes, novos, ja_tentados }. "novos" nunca foram pesquisados;
+// "ja_tentados" já foram consultados sem sucesso (não_encontrado/ambíguo) e,
+// por padrão, NÃO são re-pesquisados (economia de crédito). Não consome crédito.
+export async function consultarPendentesEnriquecimento(jobId) {
+  const { data } = await api.get(`/modulo01/enriquecimento-pendentes/${jobId}`);
+  return data;
+}
+
 // Dispara o enriquecimento automático de CNPJ a partir da razão social. Roda no
-// servidor de forma assíncrona; retorna na hora { job_id, status: "iniciado", total }.
-// O progresso é acompanhado via consultarProgressoEnriquecimento (polling).
-export async function enriquecerCnpj(jobId, limite) {
-  const params = limite ? { limite } : undefined;
-  const { data } = await api.post(`/modulo01/enriquecer-cnpj/${jobId}`, null, { params });
+// servidor de forma assíncrona; retorna na hora { job_id, status, total, forcar }.
+// Por padrão (forcar=false) processa só os NOVOS. Com forcar=true re-inclui os
+// já-tentados sem sucesso. O progresso é acompanhado via
+// consultarProgressoEnriquecimento (polling).
+export async function enriquecerCnpj(jobId, { forcar = false, limite } = {}) {
+  const params = {};
+  if (forcar) params.forcar = true;
+  if (limite) params.limite = limite;
+  const { data } = await api.post(`/modulo01/enriquecer-cnpj/${jobId}`, null, {
+    params: Object.keys(params).length ? params : undefined,
+  });
   return data;
 }
 
