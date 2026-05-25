@@ -251,10 +251,10 @@ async def processar(
 @router.post("/enriquecer-cnpj/{job_id}")
 @limiter.limit("6/minute")
 async def enriquecer_cnpj(
-    request: Request, job_id: str, limite: int | None = None,
+    request: Request, job_id: str, limite: int | None = None, forcar: bool = False,
     ctx: Contexto = Depends(contexto_atual),
 ):
-    """Dispara o enriquecimento de CNPJ em background para TODOS os fornecedores pendentes do job.
+    """Dispara o enriquecimento de CNPJ em background para os fornecedores pendentes do job.
 
     Não processa síncrono: inicia uma task que busca por razão social cada pendente (sem CNPJ),
     espaçando as chamadas com throttle para respeitar o rate do plano CNPJá. Retorna rápido.
@@ -262,6 +262,11 @@ async def enriquecer_cnpj(
 
     `limite` é só o teto de segurança por job (clamp em cnpj_lookup_limite_max); não há mais
     teto por clique. A classificação não consome créditos; só esta busca consulta a API externa.
+
+    `forcar=false` (default): pula os nomes que ESTE escritório já tentou sem sucesso (economiza
+    crédito; se já pesquisou e não achou, não é repesquisando que vai achar). Processa só os
+    NOVOS. `forcar=true`: re-inclui os já-tentados (ex.: subiu arquivo novo e quer tentar de novo).
+    Use GET /enriquecimento-pendentes/{job_id} para saber quantos são novos x já-tentados.
     """
     if not settings.cnpj_lookup_api_key:
         raise HTTPException(
@@ -276,12 +281,27 @@ async def enriquecer_cnpj(
         raise HTTPException(status_code=429, detail="Teto diário de buscas de CNPJ atingido.")
 
     teto = max(1, min(limite or settings.cnpj_lookup_limite_max, settings.cnpj_lookup_limite_max))
-    res = enriquecimento.iniciar_enriquecimento_job(job_id, teto)
+    res = await enriquecimento.iniciar_enriquecimento_job(job_id, teto, forcar=forcar)
     if res["status"] == "nao_encontrado":
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
     if res["status"] == "ja_em_andamento":
         raise HTTPException(status_code=409, detail="Já existe um enriquecimento de CNPJ em andamento para este job.")
-    return {"job_id": job_id, "status": "iniciado", "total": res["total"]}
+    return {"job_id": job_id, "status": "iniciado", "total": res["total"], "forcar": forcar}
+
+
+@router.get("/enriquecimento-pendentes/{job_id}")
+async def enriquecimento_pendentes(job_id: str, ctx: Contexto = Depends(contexto_atual)):
+    """Separa os pendentes do job em NOVOS (nunca tentados) e JÁ TENTADOS sem sucesso.
+
+    Permite a UI mostrar "X novos, Y já tentados antes (sem sucesso)" e decidir o texto do
+    botão e a estimativa de custo (no fluxo normal só os NOVOS consomem crédito). O disparo
+    normal processa só os novos; com forcar=true, processa novos + já_tentados.
+    """
+    job = store.obter(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
+    return await enriquecimento.separar_pendentes(job_id)
 
 
 @router.post("/consultar-cnd/{job_id}")

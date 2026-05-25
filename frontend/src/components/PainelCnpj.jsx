@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Loader2, Play, Search, CheckCircle2, Coins, Clock } from "lucide-react";
 import { numero, moeda } from "../utils/format.js";
-import { SERVICO } from "../utils/custos.js";
 import ConfirmacaoCusto from "./ConfirmacaoCusto.jsx";
 import ProgressBar from "./ProgressBar.jsx";
 
@@ -92,7 +91,6 @@ export default function PainelCnpj({
             quantidade={pendentes}
             custoUnitarioCent={custoCadastroCent}
             descricao="Busca de CNPJ"
-            servico={SERVICO.CADASTRO}
             processando={enriquecendo}
             onConfirmar={confirmar}
             onCancelar={() => setConfirmando(false)}

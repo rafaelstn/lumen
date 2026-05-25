@@ -109,6 +109,44 @@ class FornecedorAlias(Base):
     criado_em: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class EnriquecimentoTentativa(Base):
+    """Registro de tentativa de enriquecimento por razão social que NÃO resolveu CNPJ.
+
+    Motivação: a busca por nome no CNPJá consome crédito. Quando um nome dá nao_encontrado
+    ou ambiguo, repesquisar não tende a achar (a base do provedor não muda entre cliques).
+    Guardamos a tentativa para PULAR esse nome no enriquecimento automático e não queimar
+    crédito à toa. O usuário ainda pode FORÇAR uma nova tentativa (ex.: arquivo novo).
+
+    Os ACHADOS já viram Fornecedor/FornecedorAlias (caminho de sucesso); esta tabela é o
+    complemento, só dos NÃO-achados. Quando um nome aqui registrado for resolvido depois
+    (forçar + sucesso, ou busca manual), o alias passa a casá-lo de graça e o registro de
+    tentativa fica inerte (o casamento por alias/razão acontece antes de chegar aqui).
+
+    Multi-tenant: a lista de já-tentados é POR ESCRITÓRIO (com a flag de auth desligada,
+    cai no escritório default). Idempotente pelo par (escritorio_id, nome_normalizado):
+    repetir incrementa `tentativas` e atualiza `ultima_tentativa`, não duplica linha.
+    """
+
+    __tablename__ = "enriquecimento_tentativa"
+    __table_args__ = (
+        UniqueConstraint(
+            "escritorio_id", "nome_normalizado", name="uq_enriquecimento_tentativa"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    escritorio_id: Mapped[str] = mapped_column(String(36), index=True)
+    # Nome de entrada normalizado (uppercase, sem acento/pontuação), via cnpj_lookup._normalizar.
+    nome_normalizado: Mapped[str] = mapped_column(String(255), index=True)
+    # 'nao_encontrado' | 'ambiguo' — último resultado sem sucesso observado para o nome.
+    resultado: Mapped[str] = mapped_column(String(20))
+    # Quantas vezes esse nome já foi tentado sem sucesso (incrementa a cada nova tentativa).
+    tentativas: Mapped[int] = mapped_column(default=1)
+    ultima_tentativa: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+
 class EscritorioFornecedor(Base):
     """Associação escritório <-> CNPJ pesquisado (visão isolada sobre o cache global).
 

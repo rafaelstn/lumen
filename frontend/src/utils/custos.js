@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { getSaldo } from "../services/api.js";
+import { useCallback, useEffect, useState } from "react";
 
 // Custos de consulta paga do Módulo 02. Toda aritmética é feita em CENTAVOS
 // inteiros (nunca float) para não perder precisão em valores monetários; a
@@ -45,17 +43,6 @@ export function reaisParaCentavos(texto) {
 // comporta 2 casas. A fração não se perde no cálculo: o total usa o valor cheio.
 export function centavosParaInput(cent) {
   return (Math.max(0, Math.round(Number(cent) || 0)) / 100).toFixed(2).replace(".", ",");
-}
-
-// Converte o preco_por_credito do backend (string decimal EM CENTAVOS, ex
-// "2.499" = 2,499 centavos por crédito) num número de centavos para o cálculo.
-// Mantém a fração (não arredonda aqui): o arredondamento só acontece na
-// formatação final, ao multiplicar pela quantidade. Tolera null/vazio/lixo.
-export function precoPorCreditoParaCentavos(valor) {
-  if (valor == null) return 0;
-  const n = Number.parseFloat(String(valor).replace(",", "."));
-  if (!Number.isFinite(n) || n < 0) return 0;
-  return n;
 }
 
 // Orçamento de uma quantidade de fornecedores, em centavos. Retorna o total
@@ -122,63 +109,20 @@ export function useCustosConsulta() {
 //   cnd      (certidão de regularidade)   -> serviço "cnd"  (Infosimples)
 export const SERVICO = { CADASTRO: "cnpj", CND: "cnd" };
 
-// Créditos consumidos por UMA consulta de cada tipo. O cadastro (CNPJá
-// /office?simples=true) consome 2 créditos (Receita + Simples); a CND, 1.
-// Usado para converter o preço POR CRÉDITO do backend em custo POR CONSULTA.
-export const CREDITOS_POR_CONSULTA = { [SERVICO.CADASTRO]: 2, [SERVICO.CND]: 1 };
-
-// Chave de cache compartilhada do saldo (react-query).
-export const QUERY_SALDO = ["consultas", "saldo"];
-
-// Hook do saldo das APIs pagas. O backend é a fonte da verdade do saldo e do
-// preço REAL pago (definido na recarga).
-export function useSaldoConsulta() {
-  return useQuery({ queryKey: QUERY_SALDO, queryFn: getSaldo });
-}
-
-// Localiza o item de saldo de um serviço dentro da resposta de getSaldo().
-export function itemSaldo(saldo, servico) {
-  return saldo?.itens?.find((i) => i.servico === servico) ?? null;
-}
-
-// Há saldo CONFIGURADO para o serviço quando o usuário já registrou alguma
-// compra (creditos_comprados > 0). Só nesse caso o preço do backend é confiável.
-export function saldoConfigurado(item) {
-  return !!item && Math.trunc(Number(item.creditos_comprados) || 0) > 0;
-}
-
-// Resolve os custos POR CONSULTA EFETIVOS (em centavos) combinando duas fontes:
-//   - backend (preco_por_credito por serviço, string decimal em centavos): fonte
-//     da verdade quando há compra registrada (preço realmente pago). O custo por
-//     consulta é preco_por_credito × créditos por consulta (2 no cadastro, 1 na CND).
-//     A fração de centavo é PRESERVADA aqui; o arredondamento só ocorre no total.
-//   - localStorage (useCustosConsulta): fallback inicial e edição rápida.
-// Retorna { cadastroCent, cndCent, origemCadastro, origemCnd } onde origem ∈
-// {"backend","local"}, útil para sinalizar ao usuário de onde veio o preço.
-// Os valores podem ser fracionários quando vêm do backend; quem exibe arredonda.
+// Custos POR CONSULTA usados nas estimativas (calculadora de orçamento do M02 e
+// confirmações de custo do M01/M02). A fonte é o localStorage (defaults editáveis
+// pelo usuário): o controle de saldo/recarga foi removido, então o preço unitário
+// não é mais derivado do backend. `origemCadastro`/`origemCnd` ficam sempre
+// "local" para manter a API do hook estável (a calculadora continua editável e
+// nunca aparece travada).
 export function useCustosEfetivos() {
   const local = useCustosConsulta();
-  const { data: saldo } = useSaldoConsulta();
-
-  const efetivos = useMemo(() => {
-    const itemCad = itemSaldo(saldo, SERVICO.CADASTRO);
-    const itemCnd = itemSaldo(saldo, SERVICO.CND);
-    const usaBackCad = saldoConfigurado(itemCad);
-    const usaBackCnd = saldoConfigurado(itemCnd);
-    return {
-      cadastroCent: usaBackCad
-        ? precoPorCreditoParaCentavos(itemCad.preco_por_credito) *
-          CREDITOS_POR_CONSULTA[SERVICO.CADASTRO]
-        : local.cadastroCent,
-      cndCent: usaBackCnd
-        ? precoPorCreditoParaCentavos(itemCnd.preco_por_credito) *
-          CREDITOS_POR_CONSULTA[SERVICO.CND]
-        : local.cndCent,
-      origemCadastro: usaBackCad ? "backend" : "local",
-      origemCnd: usaBackCnd ? "backend" : "local",
-    };
-  }, [saldo, local.cadastroCent, local.cndCent]);
-
-  // Preserva os setters do localStorage (edição rápida segue funcionando).
-  return { ...efetivos, definirCadastro: local.definirCadastro, definirCnd: local.definirCnd };
+  return {
+    cadastroCent: local.cadastroCent,
+    cndCent: local.cndCent,
+    origemCadastro: "local",
+    origemCnd: "local",
+    definirCadastro: local.definirCadastro,
+    definirCnd: local.definirCnd,
+  };
 }

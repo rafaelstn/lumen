@@ -1,43 +1,16 @@
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   Wallet,
-  Coins,
-  PlusCircle,
   Receipt,
   Loader2,
   AlertCircle,
-  AlertTriangle,
-  CheckCircle2,
   Inbox,
   CalendarRange,
-  Building2,
-  FileText,
 } from "lucide-react";
-import { getSaldo, recarregar, getHistorico } from "../services/api.js";
-import { moeda, moedaPreciso, numero } from "../utils/format.js";
-import {
-  QUERY_SALDO,
-  SERVICO,
-  reaisParaCentavos,
-  precoPorCreditoParaCentavos,
-} from "../utils/custos.js";
-
-// Metadados de apresentação por serviço pago.
-const SERVICOS = [
-  {
-    id: SERVICO.CADASTRO, // "cnpj"
-    nome: "Consulta cadastral",
-    descricao: "Dados cadastrais e Simples Nacional",
-    Icone: Building2,
-  },
-  {
-    id: SERVICO.CND, // "cnd"
-    nome: "Certidão de regularidade (CND)",
-    descricao: "Certidão de regularidade fiscal",
-    Icone: FileText,
-  },
-];
+import { getHistorico } from "../services/api.js";
+import { moeda, numero } from "../utils/format.js";
+import { SERVICO } from "../utils/custos.js";
 
 const NOME_SERVICO = {
   [SERVICO.CADASTRO]: "Consulta cadastral",
@@ -54,17 +27,15 @@ const ROTULO_OPERACAO = {
 
 const ROTULO_MODULO = { modulo01: "Módulo 01", modulo02: "Módulo 02" };
 
-// Consumo & custos: visão transversal do gasto nas APIs pagas.
-// Saldo por controle interno (recarga manual) + histórico persistente.
+// Histórico de consumo e custos: visão transversal do gasto real nas APIs pagas
+// (CNPJá, Infosimples) por pesquisa. O controle de saldo/recarga foi removido (o
+// saldo real é acompanhado direto no painel do provedor); aqui fica só o que o
+// sistema registra de forma confiável: cada consulta paga, com data, custo e
+// quantidade, agregada por período e por mês.
 export default function Consumo() {
-  const saldo = useQuery({ queryKey: QUERY_SALDO, queryFn: getSaldo });
-
   return (
     <div className="space-y-6 animate-fade-up">
       <Cabecalho />
-
-      <SecaoSaldo saldo={saldo} />
-      <SecaoRecarga />
       <SecaoHistorico />
     </div>
   );
@@ -78,310 +49,14 @@ function Cabecalho() {
       </span>
       <div>
         <h1 className="font-display text-2xl font-600 tracking-tight text-ink-900">
-          Consumo &amp; custos
+          Histórico de consumo &amp; custos
         </h1>
         <p className="mt-1 max-w-xl text-sm text-slate-500">
-          Acompanhe o saldo das APIs pagas e o histórico de consultas. O saldo é por controle
-          interno: você registra quanto comprou e o sistema desconta o consumo real de cada pesquisa.
+          Acompanhe o gasto real nas APIs pagas por pesquisa. Cada consulta feita no Módulo 01 ou 02
+          é registrada aqui com data, custo e quantidade, com totais por período e por mês.
         </p>
       </div>
     </div>
-  );
-}
-
-// ---- SALDO POR SERVIÇO ------------------------------------------------
-function SecaoSaldo({ saldo }) {
-  return (
-    <section className="space-y-4">
-      <div className="flex items-center gap-2.5">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink-900 text-jade-400">
-          <Coins className="h-4 w-4" />
-        </span>
-        <h2 className="font-display text-lg font-600 text-ink-900">Saldo por serviço</h2>
-      </div>
-
-      {saldo.isError ? (
-        <ErroConsulta error={saldo.error} />
-      ) : saldo.isLoading ? (
-        <div className="grid gap-4 sm:grid-cols-2">
-          <CardSaldoEsqueleto />
-          <CardSaldoEsqueleto />
-        </div>
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2">
-          {SERVICOS.map((s) => {
-            const item = (saldo.data?.itens ?? []).find((i) => i.servico === s.id) ?? null;
-            return <CardSaldo key={s.id} meta={s} item={item} />;
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function CardSaldo({ meta, item }) {
-  const comprados = Math.trunc(Number(item?.creditos_comprados) || 0);
-  const consumidos = Math.trunc(Number(item?.creditos_consumidos) || 0);
-  const restantes = Math.trunc(Number(item?.creditos_restantes) || 0);
-  // preco_por_credito vem como string decimal EM CENTAVOS (ex "2.499"). Para
-  // exibir em reais por crédito, divide por 100 e mantém casas (fração de centavo).
-  const precoCreditoCent = precoPorCreditoParaCentavos(item?.preco_por_credito);
-  const custoRestanteCent = Math.max(0, Math.trunc(Number(item?.custo_restante_centavos) || 0));
-
-  const semConfig = comprados <= 0;
-  const negativo = restantes < 0;
-  const zerado = !semConfig && restantes === 0;
-
-  // Tom do estado: verde saudável, âmbar zerado, vermelho negativo, neutro sem config.
-  const tom = semConfig
-    ? { card: "border-slate-200", anel: "text-slate-400", valor: "text-ink-900", chip: null }
-    : negativo
-      ? {
-          card: "border-signal-200 bg-signal-50/40",
-          anel: "text-signal-500",
-          valor: "text-signal-700",
-          chip: { classe: "bg-signal-50 text-signal-700 border-signal-200", Icone: AlertTriangle, texto: "Saldo negativo" },
-        }
-      : zerado
-        ? {
-            card: "border-amber-200 bg-amber-50/40",
-            anel: "text-amber-500",
-            valor: "text-amber-700",
-            chip: { classe: "bg-amber-50 text-amber-700 border-amber-200", Icone: AlertTriangle, texto: "Saldo zerado" },
-          }
-        : {
-            card: "border-slate-200",
-            anel: "text-jade-500",
-            valor: "text-jade-700",
-            chip: { classe: "bg-jade-50 text-jade-700 border-jade-200", Icone: CheckCircle2, texto: "Saldo disponível" },
-          };
-
-  return (
-    <article className={`rounded-2xl border bg-white p-5 shadow-panel ${tom.card}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="flex items-center gap-2.5">
-          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-50 ${tom.anel}`}>
-            <meta.Icone className="h-[1.1rem] w-[1.1rem]" strokeWidth={2.1} />
-          </span>
-          <div>
-            <p className="font-display text-base font-600 text-ink-900">{meta.nome}</p>
-            <p className="text-xs text-slate-500">{meta.descricao}</p>
-          </div>
-        </div>
-        {tom.chip && (
-          <span
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-500 ${tom.chip.classe}`}
-          >
-            <tom.chip.Icone className="h-3.5 w-3.5" />
-            {tom.chip.texto}
-          </span>
-        )}
-      </div>
-
-      {semConfig ? (
-        <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-4 py-3.5 text-sm text-slate-500">
-          Nenhuma recarga registrada para este serviço. Use o formulário abaixo para informar quanto
-          você comprou.
-        </div>
-      ) : (
-        <>
-          <div className="mt-4 flex items-baseline gap-2">
-            <span className={`tnum font-display text-3xl font-600 ${tom.valor}`}>
-              {numero(restantes)}
-            </span>
-            <span className="text-sm text-slate-500">
-              crédito{restantes === 1 ? "" : "s"} restante{restantes === 1 ? "" : "s"}
-            </span>
-          </div>
-          <p className="tnum mt-0.5 text-sm text-slate-500">
-            Custo restante: <strong className={tom.valor}>{moeda(custoRestanteCent / 100)}</strong>
-          </p>
-
-          <dl className="mt-4 grid grid-cols-3 gap-2.5 border-t border-slate-100 pt-4 text-center">
-            <Metrica rotulo="Comprados" valor={numero(comprados)} />
-            <Metrica rotulo="Consumidos" valor={numero(consumidos)} />
-            <Metrica rotulo="Preço/crédito" valor={moedaPreciso(precoCreditoCent / 100)} />
-          </dl>
-        </>
-      )}
-    </article>
-  );
-}
-
-function Metrica({ rotulo, valor }) {
-  return (
-    <div>
-      <dt className="text-[0.7rem] font-600 uppercase tracking-wide text-slate-400">{rotulo}</dt>
-      <dd className="tnum mt-0.5 text-sm font-500 text-ink-900">{valor}</dd>
-    </div>
-  );
-}
-
-function CardSaldoEsqueleto() {
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
-      <div className="flex items-center gap-2.5">
-        <div className="h-9 w-9 rounded-xl bg-slate-100" />
-        <div className="space-y-1.5">
-          <div className="h-3.5 w-24 rounded bg-slate-100" />
-          <div className="h-2.5 w-36 rounded bg-slate-50" />
-        </div>
-      </div>
-      <div className="mt-4 h-8 w-28 rounded bg-slate-100" />
-      <div className="mt-3 grid grid-cols-3 gap-2.5 border-t border-slate-100 pt-4">
-        <div className="h-8 rounded bg-slate-50" />
-        <div className="h-8 rounded bg-slate-50" />
-        <div className="h-8 rounded bg-slate-50" />
-      </div>
-    </div>
-  );
-}
-
-// ---- RECARGA (registro de compra de créditos) -------------------------
-function SecaoRecarga() {
-  const queryClient = useQueryClient();
-  const [servico, setServico] = useState(SERVICO.CADASTRO);
-  const [creditos, setCreditos] = useState("");
-  const [valorTexto, setValorTexto] = useState("");
-
-  // A recarga é por VALOR TOTAL PAGO pelo pacote (não por preço unitário): o
-  // crédito custa fração de centavo e não cabe em centavo inteiro. O valor do
-  // pacote é exato e é como a compra realmente acontece.
-  const valorTotalCent = reaisParaCentavos(valorTexto);
-  const qtd = Math.max(0, Math.trunc(Number(creditos) || 0));
-  // Preço por crédito derivado, só para feedback (em reais/crédito). Mantém a
-  // fração de centavo dividindo o valor total pela quantidade.
-  const precoCreditoReais = qtd > 0 ? valorTotalCent / 100 / qtd : 0;
-  const valido = qtd > 0 && valorTotalCent > 0;
-
-  const recarga = useMutation({
-    mutationFn: () =>
-      recarregar({ servico, creditos: qtd, valor_total_centavos: valorTotalCent }),
-    onSuccess: () => {
-      setCreditos("");
-      setValorTexto("");
-      // Invalida o saldo: cards e SaldoInline (M01/M02) refletem a compra na hora.
-      queryClient.invalidateQueries({ queryKey: QUERY_SALDO });
-    },
-  });
-
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
-      <div className="flex items-center gap-2.5">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink-900 text-jade-400">
-          <PlusCircle className="h-4 w-4" />
-        </span>
-        <h2 className="font-display text-lg font-600 text-ink-900">Registrar recarga</h2>
-      </div>
-      <p className="mt-1.5 text-sm text-slate-500">
-        Informe quantos créditos você comprou e o valor total pago pelo pacote. As recargas acumulam
-        e definem o preço real por crédito usado nas estimativas de custo. Ex: 1.000 créditos por
-        R$ 24,99.
-      </p>
-
-      <form
-        className="mt-4 grid gap-3.5 sm:grid-cols-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (valido) recarga.mutate();
-        }}
-      >
-        <div>
-          <label htmlFor="recarga-servico" className="mb-1.5 block text-sm font-500 text-ink-800">
-            Serviço
-          </label>
-          <select
-            id="recarga-servico"
-            value={servico}
-            onChange={(e) => setServico(e.target.value)}
-            className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm text-ink-900 transition-colors focus:border-jade-500"
-          >
-            {SERVICOS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.nome}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div>
-          <label htmlFor="recarga-creditos" className="mb-1.5 block text-sm font-500 text-ink-800">
-            Créditos comprados
-          </label>
-          <input
-            id="recarga-creditos"
-            type="text"
-            inputMode="numeric"
-            value={creditos}
-            onChange={(e) => setCreditos(e.target.value.replace(/[^\d]/g, ""))}
-            placeholder="1000"
-            aria-describedby="recarga-exemplo"
-            className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm tnum text-ink-900 placeholder:text-slate-400 transition-colors focus:border-jade-500"
-          />
-        </div>
-
-        <div>
-          <label htmlFor="recarga-valor" className="mb-1.5 block text-sm font-500 text-ink-800">
-            Valor total pago (R$)
-          </label>
-          <div className="relative">
-            <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
-              R$
-            </span>
-            <input
-              id="recarga-valor"
-              type="text"
-              inputMode="decimal"
-              value={valorTexto}
-              onChange={(e) => setValorTexto(e.target.value)}
-              placeholder="24,99"
-              aria-describedby="recarga-exemplo"
-              className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3.5 text-sm tnum text-ink-900 placeholder:text-slate-400 transition-colors focus:border-jade-500"
-            />
-          </div>
-        </div>
-
-        <div className="sm:col-span-3 flex flex-wrap items-center gap-3">
-          <button
-            type="submit"
-            disabled={!valido || recarga.isPending}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-jade-600 px-5 py-2.5 text-sm font-600 text-white shadow-lift transition-colors hover:bg-jade-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-          >
-            {recarga.isPending ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Registrando...
-              </>
-            ) : (
-              <>
-                <PlusCircle className="h-4 w-4" /> Registrar recarga
-              </>
-            )}
-          </button>
-          {valido && !recarga.isPending ? (
-            <span className="text-sm text-slate-500">
-              {numero(qtd)} créditos por{" "}
-              <strong className="tnum text-ink-700">{moeda(valorTotalCent / 100)}</strong> ≈{" "}
-              <span className="tnum">{moedaPreciso(precoCreditoReais)}</span>/crédito
-            </span>
-          ) : (
-            <span id="recarga-exemplo" className="text-sm text-slate-400">
-              Ex: 1.000 créditos por R$ 24,99.
-            </span>
-          )}
-        </div>
-      </form>
-
-      <ErroConsulta error={recarga.error} className="mt-4" />
-      {recarga.isSuccess && (
-        <div
-          className="mt-4 flex items-start gap-2.5 rounded-xl border border-jade-200 bg-jade-50 p-3.5 text-sm text-jade-700"
-          role="status"
-        >
-          <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>Recarga registrada. O saldo foi atualizado.</span>
-        </div>
-      )}
-    </section>
   );
 }
 

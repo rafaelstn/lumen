@@ -33,9 +33,8 @@ import {
   ROTULO_COMPONENTE,
   moeda,
 } from "../utils/format.js";
-import { useCustosEfetivos, orcamento, centavosParaInput, SERVICO } from "../utils/custos.js";
+import { useCustosEfetivos, orcamento, centavosParaInput } from "../utils/custos.js";
 import ScoreGauge from "../components/ScoreGauge.jsx";
-import SaldoInline from "../components/SaldoInline.jsx";
 
 const ABAS = [
   { id: "due", rotulo: "Due diligence", Icone: ScanSearch },
@@ -196,10 +195,6 @@ function DueDiligence() {
                 {moeda(orc.totalSemCndCent / 100)} sem CND). Confirmar?
               </span>
             </p>
-            <div className="mt-2 space-y-1 pl-6">
-              <SaldoInline servico={SERVICO.CADASTRO} consumoPrevisto={orc.quantidade} />
-              <SaldoInline servico={SERVICO.CND} consumoPrevisto={orc.quantidade} />
-            </div>
             <div className="mt-3.5 flex flex-wrap gap-2.5">
               <button
                 type="button"

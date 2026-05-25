@@ -9,6 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.fornecedor import (
+    EnriquecimentoTentativa,
     EscritorioFornecedor,
     Fornecedor,
     FornecedorAlias,
@@ -312,6 +313,63 @@ async def salvar_cadastro(session: AsyncSession, cadastro: dict, origem: str = "
             )
         )
     await session.commit()
+
+
+async def registrar_tentativa(
+    session: AsyncSession, escritorio_id: str, nome_entrada: str, resultado: str
+) -> None:
+    """Upsert idempotente de uma tentativa de enriquecimento SEM sucesso, por escritório.
+
+    Chave de negócio: (escritorio_id, nome_normalizado). Se já existe, incrementa `tentativas`
+    e atualiza `ultima_tentativa`/`resultado` (não duplica). Tolerante: campo vazio é no-op.
+    Só registrar para 'nao_encontrado'/'ambiguo' (caminho de sucesso vira alias, não passa aqui).
+    """
+    escritorio_id = (escritorio_id or "").strip()
+    if not escritorio_id or not nome_entrada or not resultado:
+        return
+    norm = _normalizar(nome_entrada)
+    if not norm:
+        return
+    res = await session.execute(
+        select(EnriquecimentoTentativa).where(
+            EnriquecimentoTentativa.escritorio_id == escritorio_id,
+            EnriquecimentoTentativa.nome_normalizado == norm,
+        )
+    )
+    existente = res.scalar_one_or_none()
+    if existente:
+        existente.tentativas += 1
+        existente.resultado = resultado
+        existente.ultima_tentativa = datetime.now(timezone.utc)
+    else:
+        session.add(
+            EnriquecimentoTentativa(
+                escritorio_id=escritorio_id,
+                nome_normalizado=norm,
+                resultado=resultado,
+                tentativas=1,
+                ultima_tentativa=datetime.now(timezone.utc),
+            )
+        )
+    await session.commit()
+
+
+async def nomes_ja_tentados(session: AsyncSession, escritorio_id: str) -> set[str]:
+    """Conjunto de nomes normalizados já tentados SEM sucesso por um escritório.
+
+    Usado pelo enriquecimento para PULAR esses nomes (não queimar crédito repesquisando).
+    Isolado por escritório: a lista de um tenant não vaza para outro. Vazio se escritório
+    inválido. Tolerante: o chamador trata indisponibilidade de banco.
+    """
+    escritorio_id = (escritorio_id or "").strip()
+    if not escritorio_id:
+        return set()
+    res = await session.execute(
+        select(EnriquecimentoTentativa.nome_normalizado).where(
+            EnriquecimentoTentativa.escritorio_id == escritorio_id
+        )
+    )
+    return {row for row in res.scalars()}
 
 
 async def obter_cadastro_completo(session: AsyncSession, cnpj: str) -> dict | None:

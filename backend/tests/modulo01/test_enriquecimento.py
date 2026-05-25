@@ -45,11 +45,18 @@ def _isola(monkeypatch):
     monkeypatch.setattr(settings, "cnpj_rate_por_min", 100000)
     monkeypatch.setattr(settings, "cnpj_rate_folga", 0.0)
 
-    async def _persist_noop(job_id, achados, consumidos):
-        _persist_noop.calls.append((dict(achados), consumidos))
+    async def _persist_noop(job_id, achados, nao_achados, consumidos):
+        _persist_noop.calls.append((dict(achados), dict(nao_achados), consumidos))
 
     _persist_noop.calls = []
     monkeypatch.setattr(enriquecimento, "_persistir", _persist_noop)
+
+    # Sem banco nestes testes: a lista de já-tentados é vazia (não pula ninguém). Os testes
+    # específicos de skip/forcar montam seu próprio comportamento.
+    async def _sem_tentativas(escritorio_id):
+        return set()
+
+    monkeypatch.setattr(enriquecimento, "_nomes_ja_tentados", _sem_tentativas)
     return _persist_noop
 
 
@@ -71,7 +78,7 @@ async def test_disparo_marca_em_andamento_e_conclui(monkeypatch):
     monkeypatch.setattr(cl, "buscar_por_nome", _match(cl.CONF_ALTA))
     job_id = _job(3)
 
-    res = enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
+    res = await enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
     assert res == {"status": "iniciado", "total": 3}
     # Logo após o disparo, antes de ceder o loop, já está em_andamento.
     assert store.obter(job_id)["enriquecimento_progresso"]["status"] == "em_andamento"
@@ -100,7 +107,7 @@ async def test_contagens_por_confianca(monkeypatch):
 
     monkeypatch.setattr(cl, "buscar_por_nome", _fake)
     job_id = _job(4)
-    enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
+    await enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
     prog = await _drenar(job_id)
     assert prog["processados"] == 4
     assert prog["confirmados"] == 1
@@ -120,11 +127,11 @@ async def test_idempotencia_nao_dispara_duas_vezes(monkeypatch):
     monkeypatch.setattr(cl, "buscar_por_nome", _lento)
     job_id = _job(2)
 
-    r1 = enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
+    r1 = await enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
     assert r1["status"] == "iniciado"
     await asyncio.sleep(0)  # deixa a task começar e travar na busca lenta
 
-    r2 = enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
+    r2 = await enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
     assert r2["status"] == "ja_em_andamento"
 
     liberar.set()
@@ -146,7 +153,7 @@ async def test_throttle_respeitado(monkeypatch):
     monkeypatch.setattr(cl, "buscar_por_nome", _match(cl.CONF_ALTA))
 
     job_id = _job(5)
-    enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
+    await enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
     # Aguarda a task explicitamente (gather), sem poll por sleep que aqui está neutralizado.
     await asyncio.gather(*list(enriquecimento._tasks))
     assert len(dormidas) == 4
@@ -156,7 +163,7 @@ async def test_throttle_respeitado(monkeypatch):
 async def test_teto_de_seguranca_limita_pendentes(monkeypatch):
     monkeypatch.setattr(cl, "buscar_por_nome", _match(cl.CONF_ALTA))
     job_id = _job(10)
-    res = enriquecimento.iniciar_enriquecimento_job(job_id, 4)  # teto por job = 4
+    res = await enriquecimento.iniciar_enriquecimento_job(job_id, 4)  # teto por job = 4
     assert res["total"] == 4
     prog = await _drenar(job_id)
     assert prog["processados"] == 4
@@ -179,7 +186,7 @@ async def test_rate_limit_para_lote_e_estorna(monkeypatch):
 
     monkeypatch.setattr(cl, "buscar_por_nome", _fake)
     job_id = _job(5)
-    enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
+    await enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
     prog = await _drenar(job_id)
     assert prog["limite_taxa_atingido"] is True
     assert prog["processados"] == 1  # parou na 2a busca (rate limit)
@@ -189,16 +196,17 @@ async def test_rate_limit_para_lote_e_estorna(monkeypatch):
 async def test_persistencia_recebe_achados_e_consumidos(monkeypatch, _isola):
     monkeypatch.setattr(cl, "buscar_por_nome", _match(cl.CONF_ALTA))
     job_id = _job(2)
-    enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
+    await enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
     await _drenar(job_id)
-    # _persistir foi chamado uma vez com 2 achados e 2 buscas consumidas (audit trail).
-    achados, consumidos = _isola.calls[-1]
+    # _persistir foi chamado uma vez com 2 achados, 0 não-achados e 2 buscas consumidas.
+    achados, nao_achados, consumidos = _isola.calls[-1]
     assert len(achados) == 2
+    assert nao_achados == {}
     assert consumidos == 2
 
 
 async def test_job_inexistente():
-    res = enriquecimento.iniciar_enriquecimento_job("nao-existe", 10)
+    res = await enriquecimento.iniciar_enriquecimento_job("nao-existe", 10)
     assert res == {"status": "nao_encontrado"}
 
 
@@ -208,6 +216,6 @@ async def test_sem_pendentes_conclui_imediato(monkeypatch):
         {"status": "parsed", "fornecedores": [{"cod_forn": "JA", "nome_forn": "X", "cnpj": "37335118000180"}],
          "resumo": {}, "metadados": {}}
     )
-    res = enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
+    res = await enriquecimento.iniciar_enriquecimento_job(job_id, settings.cnpj_lookup_limite_max)
     assert res == {"status": "iniciado", "total": 0}
     assert store.obter(job_id)["enriquecimento_progresso"]["status"] == "concluido"
