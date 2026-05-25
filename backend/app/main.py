@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.ratelimit import limiter
-from app.routers import consumo, modulo01, modulo02
+from app.routers import admin, auth, consumo, modulo01, modulo02
 
 
 @asynccontextmanager
@@ -17,7 +17,7 @@ async def lifespan(app: FastAPI):
     # indisponível, loga e segue (recursos que dependem do banco apenas não funcionam).
     try:
         from app.database import async_session_factory, engine
-        from app.models import analise, escritorio, fornecedor  # noqa: F401 — registra no metadata
+        from app.models import analise, escritorio, fornecedor, usuario  # noqa: F401 — registra no metadata
         from app.models.base import Base
         from app.models.escritorio import Escritorio
         from app.modules.consumo import models as _consumo  # noqa: F401 — registra no metadata
@@ -66,6 +66,16 @@ async def lifespan(app: FastAPI):
             if await session.get(Escritorio, settings.escritorio_default_id) is None:
                 session.add(Escritorio(id=settings.escritorio_default_id, nome="Escritório padrão"))
                 await session.commit()
+
+        # Semeia o admin a partir do env (idempotente: só cria se não existir). Tolerante:
+        # falha aqui não derruba o startup. Independe de auth_enabled (o admin pode já
+        # existir antes de a flag ser ligada).
+        from app.auth.service import seed_admin
+
+        async with async_session_factory() as session:
+            criou = await seed_admin(session, settings.admin_email, settings.admin_password)
+            if criou:
+                logging.getLogger("startup").info("Admin semeado a partir do env.")
     except Exception:
         logging.getLogger("startup").exception("Não foi possível criar/verificar as tabelas.")
 
@@ -90,6 +100,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth.router, prefix="/api/auth", tags=["Autenticação"])
+app.include_router(admin.router, prefix="/api/admin", tags=["Administração"])
 app.include_router(modulo01.router, prefix="/api/modulo01", tags=["Módulo 01"])
 if settings.modulo02_enabled:
     app.include_router(modulo02.router, prefix="/api/modulo02", tags=["Módulo 02"])

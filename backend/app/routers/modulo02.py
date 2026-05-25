@@ -8,11 +8,11 @@ import re
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from app.auth.deps import escritorio_atual
+from app.auth.deps import Contexto, contexto_atual
 from app.config import settings
 from app.database import async_session_factory
 from app.modules.consumo import repo as consumo_repo
-from app.modules.modulo01 import budget, cnpj_lookup
+from app.modules.modulo01 import budget, cnpj_lookup, fornecedores_repo
 from app.modules.modulo02 import repo, service
 from app.modules.modulo02.schemas import DueDiligenceIn, MonitorarIn
 from app.ratelimit import limiter
@@ -36,6 +36,22 @@ def _normalizar_cnpjs(cnpjs: list[str]) -> list[str]:
 
 def _orcamento_ok() -> bool:
     return budget.restante("cnd") > 0 and budget.restante("cnpj") > 0
+
+
+async def _associar(escritorio_id: str, cnpjs: list[str]) -> None:
+    """Registra a associação escritório <-> CNPJ avaliado (visão isolada). Tolerante a falha."""
+    cnpjs = [c for c in {c for c in cnpjs if c}]
+    if not escritorio_id or not cnpjs:
+        return
+    try:
+        async with async_session_factory() as session:
+            for cnpj in cnpjs:
+                await fornecedores_repo.associar_escritorio(session, escritorio_id, cnpj)
+    except Exception:
+        import logging
+        logging.getLogger("modulo02").warning(
+            "Falha ao associar fornecedor(es) ao escritório.", exc_info=True
+        )
 
 
 async def _registrar_consumo(
@@ -66,7 +82,7 @@ async def _registrar_consumo(
 @router.post("/due-diligence")
 @limiter.limit("4/minute")
 async def due_diligence(
-    request: Request, body: DueDiligenceIn, escritorio: str = Depends(escritorio_atual)
+    request: Request, body: DueDiligenceIn, ctx: Contexto = Depends(contexto_atual)
 ):
     """Avalia uma lista de CNPJs (score 0-100) e devolve o ranking (pior primeiro)."""
     if not settings.infosimples_token:
@@ -109,8 +125,10 @@ async def due_diligence(
                 cnds_concluidas += 1
             resultados.append(r)
 
+    # Associa ao escritório os CNPJs avaliados (visão isolada do cache global de fornecedores).
+    await _associar(ctx.escritorio_id, [r.get("cnpj") for r in resultados if r.get("cnpj")])
     await _registrar_consumo(
-        escritorio, "modulo02", "due_diligence", consultas_cnpj, cnds_concluidas,
+        ctx.escritorio_id, "modulo02", "due_diligence", consultas_cnpj, cnds_concluidas,
         contexto=f"{len(resultados)} cnpj(s)",
     )
     resultados.sort(key=lambda r: r["score"])  # pior score primeiro (maior risco)
@@ -125,7 +143,7 @@ async def due_diligence(
 
 @router.post("/monitorar")
 @limiter.limit("12/minute")
-async def monitorar(request: Request, body: MonitorarIn, escritorio: str = Depends(escritorio_atual)):
+async def monitorar(request: Request, body: MonitorarIn, ctx: Contexto = Depends(contexto_atual)):
     """Adiciona um CNPJ à carteira monitorada, avalia e persiste o score."""
     if not settings.infosimples_token:
         raise HTTPException(status_code=400, detail="Consulta de regularidade (CND) temporariamente indisponível.")
@@ -153,36 +171,40 @@ async def monitorar(request: Request, body: MonitorarIn, escritorio: str = Depen
         raise HTTPException(status_code=502, detail="Consulta de CNPJ indisponível no momento.")
 
     async with async_session_factory() as session:
-        f = await repo.upsert_monitorado(session, escritorio, avaliacao)
+        f = await repo.upsert_monitorado(session, ctx.escritorio_id, avaliacao)
         if avaliacao["faixa"] == "ALTO":
             await repo.criar_alerta(
-                session, escritorio, f.id, "SCORE_CRITICO",
+                session, ctx.escritorio_id, f.id, "SCORE_CRITICO",
                 f"{avaliacao.get('razao_social') or avaliacao['cnpj']} entrou com score {avaliacao['score']} (risco alto).",
             )
 
+    await _associar(ctx.escritorio_id, [avaliacao.get("cnpj")])
     cnd_concluida = 1 if avaliacao.get("status_cnd") and avaliacao["status_cnd"] != "FALHA" else 0
     await _registrar_consumo(
-        escritorio, "modulo02", "avaliacao_individual", 1, cnd_concluida, contexto="monitorar"
+        ctx.escritorio_id, "modulo02", "avaliacao_individual", 1, cnd_concluida, contexto="monitorar"
     )
     return {**avaliacao, "monitorado": True}
 
 
 @router.post("/reavaliar")
 @limiter.limit("2/minute")
-async def reavaliar(request: Request, escritorio: str = Depends(escritorio_atual)):
-    """Re-consulta a carteira monitorada agora (sob demanda), gerando alertas em mudança."""
+async def reavaliar(request: Request, ctx: Contexto = Depends(contexto_atual)):
+    """Re-consulta a carteira monitorada agora (sob demanda), gerando alertas em mudança.
+
+    Reavalia a carteira do PRÓPRIO escritório (inclusive admin: reavalia a dele).
+    """
     if not settings.infosimples_token:
         raise HTTPException(status_code=400, detail="Consulta de regularidade (CND) temporariamente indisponível.")
     async with async_session_factory() as session:
-        return await service.reavaliar_carteira(session, escritorio)
+        return await service.reavaliar_carteira(session, ctx.escritorio_id)
 
 
 @router.get("/monitorados")
-async def monitorados(escritorio: str = Depends(escritorio_atual)):
-    """Carteira monitorada, ordenada por score (pior primeiro)."""
+async def monitorados(ctx: Contexto = Depends(contexto_atual)):
+    """Carteira monitorada, ordenada por score (pior primeiro). Admin vê de todos os escritórios."""
     try:
         async with async_session_factory() as session:
-            forns = await repo.listar_monitorados(session, escritorio)
+            forns = await repo.listar_monitorados(session, ctx.filtro_escritorio)
     except Exception:
         raise HTTPException(status_code=503, detail="Carteira temporariamente indisponível.")
     return [
@@ -199,10 +221,10 @@ async def monitorados(escritorio: str = Depends(escritorio_atual)):
 
 
 @router.get("/alertas")
-async def alertas(escritorio: str = Depends(escritorio_atual)):
+async def alertas(ctx: Contexto = Depends(contexto_atual)):
     try:
         async with async_session_factory() as session:
-            itens = await repo.listar_alertas(session, escritorio)
+            itens = await repo.listar_alertas(session, ctx.filtro_escritorio)
     except Exception:
         raise HTTPException(status_code=503, detail="Alertas temporariamente indisponíveis.")
     return [

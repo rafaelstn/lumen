@@ -10,11 +10,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.modules.modulo02.models import Alerta, FornecedorMonitorado, HistoricoCnd
 
 
-async def listar_monitorados(session: AsyncSession, escritorio_id: str) -> list[FornecedorMonitorado]:
+async def listar_monitorados(
+    session: AsyncSession, escritorio_id: str | None
+) -> list[FornecedorMonitorado]:
+    """Carteira do escritório. `escritorio_id`=None (admin) lista de todos os escritórios."""
+    stmt = select(FornecedorMonitorado).where(FornecedorMonitorado.ativo)
+    if escritorio_id is not None:
+        stmt = stmt.where(FornecedorMonitorado.escritorio_id == escritorio_id)
     res = await session.execute(
-        select(FornecedorMonitorado)
-        .where(FornecedorMonitorado.escritorio_id == escritorio_id, FornecedorMonitorado.ativo)
-        .order_by(FornecedorMonitorado.score_atual.asc().nulls_last())
+        stmt.order_by(FornecedorMonitorado.score_atual.asc().nulls_last())
     )
     return list(res.scalars())
 
@@ -61,8 +65,11 @@ async def criar_alerta(session, escritorio_id: str, fornecedor_id: str, tipo: st
     await session.commit()
 
 
-async def listar_alertas(session, escritorio_id: str, apenas_nao_lidos: bool = False) -> list[Alerta]:
-    q = select(Alerta).where(Alerta.escritorio_id == escritorio_id)
+async def listar_alertas(session, escritorio_id: str | None, apenas_nao_lidos: bool = False) -> list[Alerta]:
+    """Alertas do escritório. `escritorio_id`=None (admin) lista de todos os escritórios."""
+    q = select(Alerta)
+    if escritorio_id is not None:
+        q = q.where(Alerta.escritorio_id == escritorio_id)
     if apenas_nao_lidos:
         q = q.where(~Alerta.lido)
     res = await session.execute(q.order_by(Alerta.criado_em.desc()).limit(100))

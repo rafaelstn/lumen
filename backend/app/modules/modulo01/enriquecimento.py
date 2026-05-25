@@ -203,6 +203,11 @@ async def _persistir(job_id: str, achados: dict, consumidos: int) -> None:
 
     O dado essencial (CNPJ casado) já está no store; falha de banco/consumo não derruba o lote.
     """
+    # Tenant dono do job (multi-tenant). Fallback no default preserva o comportamento atual
+    # quando a flag de auth está desligada (o job carrega o escritório default).
+    job = store.obter(job_id) or {}
+    escritorio_id = job.get("escritorio_id") or settings.escritorio_default_id
+
     if achados:
         try:
             async with async_session_factory() as session:
@@ -218,6 +223,8 @@ async def _persistir(job_id: str, achados: dict, consumidos: int) -> None:
                     # Alias do NOME DE ENTRADA do arquivo: a re-análise casa de graça mesmo
                     # quando o nome oficial salvo difere da grafia do arquivo.
                     await fornecedores_repo.registrar_alias(session, a["nome_entrada"], a["cnpj"])
+                    # Visão isolada do cache global: associa o CNPJ resolvido ao escritório.
+                    await fornecedores_repo.associar_escritorio(session, escritorio_id, a["cnpj"])
         except Exception:
             logger.warning(
                 "Enriquecimento: falha ao salvar CNPJ/alias no banco (job %s).", job_id[:8], exc_info=True
@@ -228,7 +235,7 @@ async def _persistir(job_id: str, achados: dict, consumidos: int) -> None:
 
     try:
         await consumo_repo.registrar_cnpj(
-            escritorio_id=settings.escritorio_default_id, modulo="modulo01",
+            escritorio_id=escritorio_id, modulo="modulo01",
             operacao="enriquecimento", consultas=consumidos, contexto=f"job {job_id[:8]}",
         )
     except Exception:

@@ -68,12 +68,22 @@ class Settings(BaseSettings):
     modulo02_enabled: bool = True
     modulo03_enabled: bool = False
 
-    # Auth (JWT próprio) — preparado, NÃO ativo no MVP. O login real entra depois;
-    # por ora todo dado pertence ao escritório default (single-tenant na prática).
+    # Auth (JWT próprio). Flag MESTRE do login/multi-tenant. Com False (estado atual),
+    # o sistema roda anônimo no escritório default, EXATAMENTE como hoje (sem exigir
+    # Authorization). Com True, exige login e isola os dados por escritório. O Rafael
+    # liga a flag depois que o frontend de login estiver pronto.
+    auth_enabled: bool = False
     jwt_secret: str = "trocar-em-producao"
     jwt_algorithm: str = "HS256"
     jwt_expira_min: int = 480
     escritorio_default_id: str = "00000000-0000-0000-0000-000000000001"
+
+    # Admin principal semeado no startup a partir do env (idempotente: só cria se não
+    # existir um usuário com este e-mail). Em produção, setar no Railway com senha forte.
+    admin_email: str = ""
+    admin_password: str = ""
+    # Tamanho mínimo de senha no signup (validação na borda).
+    senha_min_len: int = 8
 
     # Limites de upload e do store de jobs (proteção contra DoS/OOM).
     max_upload_mb: int = 10

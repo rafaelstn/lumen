@@ -10,8 +10,9 @@ import re
 import tempfile
 from datetime import datetime
 
-from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 
+from app.auth.deps import Contexto, contexto_atual
 from app.config import settings
 from app.database import async_session_factory
 from app.modules.modulo01 import (
@@ -62,6 +63,24 @@ async def _salvar_no_banco(itens: list[tuple[str, str, str]]) -> None:
                 await fornecedores_repo.upsert(session, cnpj, razao, origem)
     except Exception:
         logger.warning("Não foi possível salvar fornecedor(es) no banco.", exc_info=True)
+
+
+async def _associar_fornecedores(escritorio_id: str, cnpjs: list[str]) -> None:
+    """Registra a associação escritório <-> CNPJ pesquisado (visão isolada). Tolerante a falha.
+
+    Dá ao escritório a visibilidade dos CNPJs que ele resolveu/usou, sobre o cache global.
+    Idempotente por par. Com auth desligada o escritorio_id é o default; não muda o resultado
+    (a listagem com flag off não filtra por escritório).
+    """
+    cnpjs = [c for c in {c for c in cnpjs if c}]
+    if not escritorio_id or not cnpjs:
+        return
+    try:
+        async with async_session_factory() as session:
+            for cnpj in cnpjs:
+                await fornecedores_repo.associar_escritorio(session, escritorio_id, cnpj)
+    except Exception:
+        logger.warning("Não foi possível associar fornecedor(es) ao escritório.", exc_info=True)
 
 
 async def _registrar_aliases(itens: list[tuple[str, str]]) -> None:
@@ -155,6 +174,7 @@ async def processar(
     request: Request,
     entradas: UploadFile = File(..., description="Livro de Entradas (XLS)"),
     cadastro: UploadFile | None = File(None, description="Cadastro de Fornecedores (XLS, opcional)"),
+    ctx: Contexto = Depends(contexto_atual),
 ):
     """Recebe os arquivos, classifica os fornecedores e devolve o resultado + job_id."""
     _validar_extensao(entradas)
@@ -190,6 +210,9 @@ async def processar(
         {
             "status": "parsed",
             "metadados": metadados,
+            # Dono da análise (tenant). Com auth desligada é o escritório default
+            # (analises_repo.salvar já usa esse fallback) — comportamento preservado.
+            "escritorio_id": ctx.escritorio_id,
             "resumo": resumo,
             "fornecedores": fornecedores,
         }
@@ -197,6 +220,10 @@ async def processar(
 
     # Persiste no histórico para reabrir sem re-subir a planilha (id estável = job_id).
     await _persistir_analise(job_id)
+    # Associa ao escritório os CNPJs já resolvidos no casamento (visão isolada do cache global).
+    await _associar_fornecedores(
+        ctx.escritorio_id, [f.get("cnpj") for f in fornecedores if f.get("cnpj")]
+    )
 
     return ProcessarResponse(
         job_id=job_id, status="parsed", metadados=metadados, resumo=resumo, fornecedores=fornecedores
@@ -397,6 +424,10 @@ async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
     # também a nova grafia), para a re-análise casar de graça por qualquer uma delas.
     aliases = {nome_entrada_original, final["nome_forn"]}
     await _registrar_aliases([(nome, cnpj) for nome in aliases if nome])
+    # Associa o CNPJ resolvido ao escritório dono do job (visão isolada do cache global).
+    await _associar_fornecedores(
+        atual.get("escritorio_id") or settings.escritorio_default_id, [cnpj]
+    )
     # Reflete a correção manual no histórico (CNPJ confirmado / risco reaplicado).
     await _persistir_analise(job_id)
     return final
@@ -428,15 +459,16 @@ def _iso(dt) -> str | None:
 
 @router.get("/analises", response_model=AnalisesHistoricoResponse)
 @limiter.limit("60/minute")
-async def listar_analises(request: Request):
+async def listar_analises(request: Request, ctx: Contexto = Depends(contexto_atual)):
     """Histórico de análises do escritório (acesso rápido para reabrir sem re-subir a planilha).
 
     Lista leve (sem o payload de fornecedores), ordenada por mais recente. Tolerante: se o banco
     estiver indisponível, devolve 503 (o histórico é uma conveniência, não derruba o M01).
+    Isolada por escritório (admin vê de todos). Com auth desligada, cai no escritório default.
     """
     try:
         async with async_session_factory() as session:
-            analises = await analises_repo.listar(session, settings.escritorio_default_id)
+            analises = await analises_repo.listar(session, ctx.filtro_escritorio)
     except Exception:
         raise HTTPException(status_code=503, detail="Histórico temporariamente indisponível.")
     return AnalisesHistoricoResponse(
@@ -457,7 +489,7 @@ async def listar_analises(request: Request):
 
 @router.get("/analise/{analise_id}", response_model=ProcessarResponse)
 @limiter.limit("60/minute")
-async def reabrir_analise(request: Request, analise_id: str):
+async def reabrir_analise(request: Request, analise_id: str, ctx: Contexto = Depends(contexto_atual)):
     """Reabre uma análise do histórico: devolve o estado completo e RE-HIDRATA o job no store.
 
     Mesmo shape de /resultado/{job_id}. Re-hidratação: se o job ainda vive no store (TTL não
@@ -466,11 +498,24 @@ async def reabrir_analise(request: Request, analise_id: str):
     frontend continua enriquecimento/CND/relatório de onde parou, sem re-subir a planilha.
     """
     job = store.obter(analise_id)
+    # Mesmo quando o job ainda vive no store (job_id é UUID não-adivinhável), confirmamos a
+    # posse no banco antes de servir, para não vazar análise de outro escritório com a flag de
+    # auth ligada. ctx.filtro_escritorio=None (admin/auth off) não filtra. Tolerante a banco off:
+    # se a verificação falhar e o job estiver em memória, mantém o comportamento atual.
+    if job is not None and ctx.filtro_escritorio is not None:
+        try:
+            async with async_session_factory() as session:
+                if await analises_repo.obter(session, analise_id, ctx.filtro_escritorio) is None:
+                    raise HTTPException(status_code=404, detail="Análise não encontrada.")
+        except HTTPException:
+            raise
+        except Exception:
+            logger.warning("Verificação de posse da análise indisponível.", exc_info=True)
     if job is None:
         try:
             async with async_session_factory() as session:
                 analise = await analises_repo.obter(
-                    session, analise_id, settings.escritorio_default_id
+                    session, analise_id, ctx.filtro_escritorio
                 )
         except Exception:
             raise HTTPException(status_code=503, detail="Histórico temporariamente indisponível.")
@@ -503,12 +548,15 @@ async def reabrir_analise(request: Request, analise_id: str):
 
 @router.delete("/analise/{analise_id}")
 @limiter.limit("60/minute")
-async def apagar_analise(request: Request, analise_id: str):
-    """Apaga uma análise do histórico (e remove o job do store, se ainda existir)."""
+async def apagar_analise(request: Request, analise_id: str, ctx: Contexto = Depends(contexto_atual)):
+    """Apaga uma análise do histórico (e remove o job do store, se ainda existir).
+
+    Isolada por escritório: só apaga a própria (admin apaga de qualquer um).
+    """
     try:
         async with async_session_factory() as session:
             removida = await analises_repo.apagar(
-                session, analise_id, settings.escritorio_default_id
+                session, analise_id, ctx.filtro_escritorio
             )
     except Exception:
         raise HTTPException(status_code=503, detail="Histórico temporariamente indisponível.")
@@ -521,19 +569,23 @@ async def apagar_analise(request: Request, analise_id: str):
 @router.get("/fornecedores", response_model=FornecedoresGlobaisResponse)
 @limiter.limit("60/minute")
 async def listar_fornecedores_global(
-    request: Request, offset: int = 0, limit: int = 50, q: str = ""
+    request: Request, offset: int = 0, limit: int = 50, q: str = "",
+    ctx: Contexto = Depends(contexto_atual),
 ):
-    """Listagem global e paginada de TODOS os fornecedores do cache (visão global, todos clientes).
+    """Listagem paginada de fornecedores do cache, com VISÃO ISOLADA por escritório.
 
-    O banco de fornecedores é compartilhado (sem escritorio_id). `q` filtra por nome ou CNPJ.
-    NUNCA inclui sócios (LGPD): o quadro societário só sai no detalhe /fornecedor/{cnpj}.
+    O cadastro é um cache GLOBAL compartilhado, mas cada escritório só vê os CNPJs que ELE
+    pesquisou (associação escritorio_fornecedor). O admin vê todos. Com auth desligada, vê
+    todos (comportamento atual). `q` filtra por nome ou CNPJ. NUNCA inclui sócios (LGPD).
     Limite máximo por página (anti-abuso): 100. offset/limit saneados.
     """
     offset = max(0, offset)
     limit = max(1, min(limit, 100))
     try:
         async with async_session_factory() as session:
-            forns, total = await fornecedores_repo.listar_paginado(session, offset, limit, q)
+            forns, total = await fornecedores_repo.listar_paginado(
+                session, offset, limit, q, escritorio_id=ctx.filtro_escritorio
+            )
     except Exception:
         raise HTTPException(status_code=503, detail="Listagem de fornecedores temporariamente indisponível.")
     return FornecedoresGlobaisResponse(

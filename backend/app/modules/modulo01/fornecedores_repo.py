@@ -8,7 +8,12 @@ from datetime import datetime, timezone
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fornecedor import Fornecedor, FornecedorAlias, FornecedorSocio
+from app.models.fornecedor import (
+    EscritorioFornecedor,
+    Fornecedor,
+    FornecedorAlias,
+    FornecedorSocio,
+)
 from app.modules.modulo01.cnpj_lookup import _normalizar
 
 # Campos escalares do cadastro completo que o salvar_cadastro persiste no Fornecedor.
@@ -84,28 +89,51 @@ async def registrar_alias(session: AsyncSession, nome_entrada: str, cnpj: str) -
     await session.commit()
 
 
-async def buscar(session: AsyncSession, q: str, limite: int = 10) -> list[Fornecedor]:
-    """Busca textual (campo de pesquisa manual gratuita)."""
+async def buscar(
+    session: AsyncSession, q: str, limite: int = 10, escritorio_id: str | None = None
+) -> list[Fornecedor]:
+    """Busca textual (campo de pesquisa manual gratuita).
+
+    `escritorio_id`=None -> sem filtro de tenant (admin ou flag de auth desligada).
+    Com um escritorio_id, restringe aos fornecedores associados a esse escritório (visão
+    isolada sobre o cache global).
+    """
     norm = _normalizar(q)
     if len(norm) < 3:
         return []
-    res = await session.execute(
-        select(Fornecedor).where(Fornecedor.nome_normalizado.ilike(f"%{norm}%")).limit(limite)
-    )
+    stmt = select(Fornecedor).where(Fornecedor.nome_normalizado.ilike(f"%{norm}%"))
+    stmt = _restringe_por_escritorio(stmt, escritorio_id)
+    res = await session.execute(stmt.limit(limite))
     return list(res.scalars())
 
 
+def _restringe_por_escritorio(stmt, escritorio_id: str | None):
+    """Aplica a visão isolada: só os CNPJs associados ao escritório.
+
+    None = sem filtro (admin ou auth desligada). Caso contrário, restringe aos CNPJs
+    presentes em escritorio_fornecedor para o escritorio_id (subquery, sem duplicar linhas).
+    """
+    if escritorio_id is None:
+        return stmt
+    cnpjs_do_escritorio = (
+        select(EscritorioFornecedor.cnpj)
+        .where(EscritorioFornecedor.escritorio_id == escritorio_id)
+    )
+    return stmt.where(Fornecedor.cnpj.in_(cnpjs_do_escritorio))
+
+
 async def listar_paginado(
-    session: AsyncSession, offset: int, limite: int, q: str = ""
+    session: AsyncSession, offset: int, limite: int, q: str = "", escritorio_id: str | None = None
 ) -> tuple[list[Fornecedor], int]:
-    """Lista paginada de TODOS os fornecedores do cache global (visão global do Rafael).
+    """Lista paginada de fornecedores do cache global, com visão isolada por escritório.
+
+    `escritorio_id`=None -> vê TODOS (admin, ou flag de auth desligada = comportamento atual).
+    Com um escritorio_id, vê só os fornecedores que ESSE escritório pesquisou (associação em
+    escritorio_fornecedor).
 
     `q` filtra por razão social (nome normalizado) OU por dígitos de CNPJ. Devolve (linhas, total),
-    onde total é a contagem do mesmo filtro (para a paginação do frontend). NÃO toca em sócios
-    (dado pessoal de terceiros, LGPD): o quadro societário só sai no detalhe sob demanda.
-
-    Ordena por cadastro mais recente primeiro (cadastro_atualizado_em desc, depois id desc) para
-    o que foi pesquisado por último aparecer no topo.
+    onde total é a contagem do MESMO filtro. NÃO toca em sócios (LGPD): o quadro societário só
+    sai no detalhe sob demanda. Ordena por cadastro mais recente primeiro.
     """
     filtros = []
     termo = (q or "").strip()
@@ -127,6 +155,8 @@ async def listar_paginado(
     for f in filtros:
         base = base.where(f)
         cont = cont.where(f)
+    base = _restringe_por_escritorio(base, escritorio_id)
+    cont = _restringe_por_escritorio(cont, escritorio_id)
 
     total = (await session.execute(cont)).scalar_one()
     res = await session.execute(
@@ -137,6 +167,29 @@ async def listar_paginado(
         .limit(limite)
     )
     return list(res.scalars()), int(total)
+
+
+async def associar_escritorio(session: AsyncSession, escritorio_id: str, cnpj: str) -> None:
+    """Registra (idempotente) que um escritório pesquisou/usou um CNPJ.
+
+    É o que dá a VISÃO ISOLADA sobre o cache global: o cadastro fica compartilhado, mas a
+    listagem do escritório só mostra os CNPJs que ele associou. Tolerante: vazio é no-op;
+    par já existente é no-op (UNIQUE escritorio_id+cnpj).
+    """
+    escritorio_id = (escritorio_id or "").strip()
+    cnpj = (cnpj or "").strip()
+    if not escritorio_id or not cnpj:
+        return
+    existe = await session.execute(
+        select(EscritorioFornecedor.id).where(
+            EscritorioFornecedor.escritorio_id == escritorio_id,
+            EscritorioFornecedor.cnpj == cnpj,
+        )
+    )
+    if existe.scalar_one_or_none() is not None:
+        return
+    session.add(EscritorioFornecedor(escritorio_id=escritorio_id, cnpj=cnpj))
+    await session.commit()
 
 
 async def registrar_cnd(

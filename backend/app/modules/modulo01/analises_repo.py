@@ -67,43 +67,47 @@ async def salvar(session: AsyncSession, analise_id: str, job: dict) -> None:
     await session.commit()
 
 
-async def listar(session: AsyncSession, escritorio_id: str) -> list[Analise]:
+async def listar(session: AsyncSession, escritorio_id: str | None) -> list[Analise]:
     """Lista o histórico do escritório (sem o payload pesado é responsabilidade do serializer).
 
-    Ordenado por mais recente (atualizado_em desc). Retorna os ORM; o router projeta só os
-    campos leves (id, cliente, cnpj_cliente, periodo, total_fornecedores, criado_em, atualizado_em).
+    `escritorio_id`=None -> lista de TODOS os escritórios (admin, ou auth desligada quando o
+    chamador passar o default). Ordenado por mais recente. Retorna os ORM; o router projeta
+    só os campos leves.
     """
+    stmt = select(Analise)
+    if escritorio_id is not None:
+        stmt = stmt.where(Analise.escritorio_id == escritorio_id)
     res = await session.execute(
-        select(Analise)
-        .where(Analise.escritorio_id == escritorio_id)
-        .order_by(Analise.atualizado_em.desc(), Analise.criado_em.desc())
+        stmt.order_by(Analise.atualizado_em.desc(), Analise.criado_em.desc())
     )
     return list(res.scalars())
 
 
-async def obter(session: AsyncSession, analise_id: str, escritorio_id: str) -> Analise | None:
+async def obter(session: AsyncSession, analise_id: str, escritorio_id: str | None) -> Analise | None:
     """Lê uma análise do histórico (com o estado completo) para reabrir. 404 fica a cargo do router.
 
-    Filtra por escritorio_id para não vazar análise de outro tenant (multi-tenant futuro).
+    Filtra por escritorio_id para não vazar análise de outro tenant. `escritorio_id`=None
+    (admin) lê de qualquer escritório.
     """
     if not analise_id:
         return None
-    res = await session.execute(
-        select(Analise).where(
-            Analise.id == analise_id, Analise.escritorio_id == escritorio_id
-        )
-    )
+    stmt = select(Analise).where(Analise.id == analise_id)
+    if escritorio_id is not None:
+        stmt = stmt.where(Analise.escritorio_id == escritorio_id)
+    res = await session.execute(stmt)
     return res.scalar_one_or_none()
 
 
-async def apagar(session: AsyncSession, analise_id: str, escritorio_id: str) -> bool:
-    """Remove a análise do histórico. Devolve True se removeu algo (para o router devolver 404)."""
+async def apagar(session: AsyncSession, analise_id: str, escritorio_id: str | None) -> bool:
+    """Remove a análise do histórico. Devolve True se removeu algo (para o router devolver 404).
+
+    `escritorio_id`=None (admin) pode remover de qualquer escritório.
+    """
     if not analise_id:
         return False
-    res = await session.execute(
-        delete(Analise).where(
-            Analise.id == analise_id, Analise.escritorio_id == escritorio_id
-        )
-    )
+    stmt = delete(Analise).where(Analise.id == analise_id)
+    if escritorio_id is not None:
+        stmt = stmt.where(Analise.escritorio_id == escritorio_id)
+    res = await session.execute(stmt)
     await session.commit()
     return res.rowcount > 0
