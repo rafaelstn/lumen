@@ -70,13 +70,8 @@ export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
         ].join(" ")}
         aria-label="Navegação principal"
       >
-        {/* Texturas: assinatura visual do Lumen */}
-        <div className="pointer-events-none absolute inset-0 reticle" aria-hidden="true" />
-        <div className="pointer-events-none absolute inset-0 noise" aria-hidden="true" />
-        <div
-          className="pointer-events-none absolute -left-16 -top-16 h-56 w-56 rounded-full bg-jade-500/20 blur-3xl"
-          aria-hidden="true"
-        />
+        {/* Grade de medição discreta: assinatura sutil, sem ruído nem glow */}
+        <div className="pointer-events-none absolute inset-0 reticle opacity-60" aria-hidden="true" />
 
         {/* Marca */}
         <div className="relative flex items-center justify-between gap-3 border-b border-white/5 px-5 py-5">
@@ -91,7 +86,7 @@ export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
                   Fiscal
                 </span>
               </div>
-              <p className="mt-1 text-[0.7rem] text-ink-600/90">Inteligência tributária</p>
+              <p className="mt-1 text-[0.7rem] text-slate-400">Inteligência tributária</p>
             </div>
           </div>
           <button
@@ -162,7 +157,7 @@ function ModuloAtivo({ mod, view, onNavegar }) {
                   "group relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors",
                   atual
                     ? "bg-jade-500/12 font-500 text-jade-300"
-                    : "text-ink-600/90 hover:bg-white/5 hover:text-white",
+                    : "text-slate-300 hover:bg-white/5 hover:text-white",
                 ].join(" ")}
               >
                 {/* Faixa indicadora do item ativo */}
@@ -172,7 +167,7 @@ function ModuloAtivo({ mod, view, onNavegar }) {
                 <sub.Icone
                   className={[
                     "h-4 w-4 shrink-0 transition-colors",
-                    atual ? "text-jade-400" : "text-ink-600 group-hover:text-jade-400",
+                    atual ? "text-jade-400" : "text-slate-500 group-hover:text-jade-400",
                   ].join(" ")}
                 />
                 {sub.rotulo}
@@ -188,19 +183,19 @@ function ModuloAtivo({ mod, view, onNavegar }) {
 function ModuloEmBreve({ mod }) {
   return (
     <div
-      className="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2.5 opacity-55"
+      className="flex cursor-not-allowed items-center gap-2.5 rounded-lg px-3 py-2"
       title={mod.tooltip}
       aria-disabled="true"
     >
-      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-white/5 text-xs font-600 tnum text-ink-600">
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-white/5 text-xs font-600 tnum text-slate-400">
         {mod.numero}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-500 text-ink-600">{mod.titulo}</span>
-      </span>
-      <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[0.6rem] font-500 uppercase tracking-wide text-ink-600">
-        <Lock className="h-2.5 w-2.5" strokeWidth={2.4} />
-        Em breve
+        <span className="block text-sm font-500 text-slate-300">{mod.titulo}</span>
+        <span className="mt-0.5 inline-flex items-center gap-1 text-[0.65rem] font-500 uppercase tracking-wide text-slate-500">
+          <Lock className="h-2.5 w-2.5" strokeWidth={2.4} />
+          Em breve
+        </span>
       </span>
     </div>
   );
