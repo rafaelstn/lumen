@@ -18,7 +18,14 @@ from app.models import analise as _analise  # noqa: F401
 from app.modules.modulo02 import models as _m02  # noqa: F401
 from app.modules.consumo import models as _consumo  # noqa: F401
 
-_ROTAS = ("app.routers.auth", "app.routers.admin", "app.routers.modulo01", "app.routers.modulo02")
+_ROTAS = (
+    "app.routers.auth",
+    "app.routers.admin",
+    "app.routers.modulo01",
+    "app.routers.modulo02",
+    "app.routers.consumo",
+    "app.modules.consumo.repo",
+)
 
 
 @pytest_asyncio.fixture

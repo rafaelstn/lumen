@@ -8,8 +8,105 @@ const api = axios.create({
   baseURL: `${API_BASE}/api`,
 });
 
+// ---- SESSÃO / TOKEN -----------------------------------------------------
+// O token vive em localStorage. Quando há token (modo auth ligado), todo
+// request leva Authorization: Bearer. Quando não há (modo anônimo atual),
+// nada muda no comportamento de hoje.
+const TOKEN_KEY = "lumen.token";
+
+export function lerToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || null;
+  } catch {
+    return null;
+  }
+}
+
+export function gravarToken(token) {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token);
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* localStorage indisponível: segue sem persistir */
+  }
+}
+
+// Callback registrado pelo AuthProvider para reagir a um 401 (sessão expirada
+// ou inválida) em modo auth ligado: limpa sessão e devolve à tela de login.
+let onSessaoExpirada = null;
+export function registrarHandlerSessaoExpirada(fn) {
+  onSessaoExpirada = fn;
+}
+
+// Injeta o Bearer em toda request quando existe token.
+api.interceptors.request.use((config) => {
+  const token = lerToken();
+  if (token) {
+    config.headers = config.headers ?? {};
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// Em 401, só reage se havia token (sessão de fato expirada). Em modo anônimo
+// não existe token, então um eventual 401 não dispara logout.
+api.interceptors.response.use(
+  (resp) => resp,
+  (error) => {
+    if (error?.response?.status === 401 && lerToken()) {
+      gravarToken(null);
+      if (typeof onSessaoExpirada === "function") onSessaoExpirada();
+    }
+    return Promise.reject(error);
+  }
+);
+
+// /health: { status, version, auth_enabled }. Define o modo de operação do app.
 export async function getHealth() {
   const { data } = await axios.get(`${API_BASE}/health`);
+  return data;
+}
+
+// ---- AUTENTICAÇÃO (prefixo /api/auth) ----------------------------------
+// Cadastro já loga: devolve { usuario, token:{ access_token, ... } }.
+export async function signup({ nome_escritorio, email, senha }) {
+  const { data } = await api.post("/auth/signup", { nome_escritorio, email, senha });
+  return data;
+}
+
+// Login: { access_token, token_type, expira_em_min }. 401 genérico se inválido.
+export async function login({ email, senha }) {
+  const { data } = await api.post("/auth/login", { email, senha });
+  return data;
+}
+
+// Dados do usuário logado: { id, email, escritorio_id, role, ativo, ... }.
+export async function getMe() {
+  const { data } = await api.get("/auth/me");
+  return data;
+}
+
+// ---- ADMIN (prefixo /api/admin, exige token de admin; 403 se não-admin) -
+export async function getAdminResumo() {
+  const { data } = await api.get("/admin/resumo");
+  return data;
+}
+
+export async function getAdminEscritorios() {
+  const { data } = await api.get("/admin/escritorios");
+  return data;
+}
+
+export async function getAdminConsumoPorEscritorio({ inicio, fim } = {}) {
+  const params = {};
+  if (inicio) params.inicio = inicio;
+  if (fim) params.fim = fim;
+  const { data } = await api.get("/admin/consumo-por-escritorio", { params });
+  return data;
+}
+
+export async function getAdminEscritorioDetalhe(id) {
+  const { data } = await api.get(`/admin/escritorio/${id}`);
   return data;
 }
 

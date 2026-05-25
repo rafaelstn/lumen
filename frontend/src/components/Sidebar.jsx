@@ -8,7 +8,10 @@ import {
   Receipt,
   Lock,
   X,
+  LayoutDashboard,
+  LogOut,
 } from "lucide-react";
+import { useAuth } from "../context/AuthContext.jsx";
 
 // Itens transversais (não pertencem a um módulo específico).
 const TRANSVERSAIS = [{ view: "consumo", rotulo: "Consumo & custos", Icone: Receipt }];
@@ -46,6 +49,8 @@ const MODULOS = [
 ];
 
 export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
+  const { ehAdmin, usuario, logout } = useAuth();
+
   // Fecha o drawer com Esc no mobile (acessibilidade de teclado).
   useEffect(() => {
     if (!aberto) return;
@@ -117,13 +122,18 @@ export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
             ))}
           </ul>
 
-          {/* Seção transversal: ferramentas que valem para todos os módulos */}
+          {/* Seção transversal: ferramentas que valem para todos os módulos.
+              O Dashboard admin só aparece para role === "admin". Em modo
+              anônimo (sem usuário) ehAdmin é false: a navegação fica como hoje. */}
           <div className="mt-5 border-t border-white/5 pt-4">
             <p className="px-3 pb-1.5 text-[0.65rem] font-600 uppercase tracking-[0.16em] text-slate-500">
               Geral
             </p>
             <ul className="space-y-0.5">
-              {TRANSVERSAIS.map((item) => {
+              {(ehAdmin
+                ? [{ view: "admin", rotulo: "Painel administrativo", Icone: LayoutDashboard }, ...TRANSVERSAIS]
+                : TRANSVERSAIS
+              ).map((item) => {
                 const atual = view === item.view;
                 return (
                   <li key={item.view}>
@@ -158,6 +168,27 @@ export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
 
         {/* Rodapé */}
         <div className="relative border-t border-white/5 px-5 py-4">
+          {/* Sessão: só quando há usuário logado (modo auth ligado). Em modo
+              anônimo, mantém apenas o selo de confidencialidade, como hoje. */}
+          {usuario && (
+            <div className="mb-3 flex items-center justify-between gap-2 rounded-lg bg-white/5 px-3 py-2.5">
+              <div className="min-w-0">
+                <p className="truncate text-xs font-500 text-white">{usuario.email}</p>
+                <p className="mt-0.5 text-[0.65rem] uppercase tracking-wide text-slate-500">
+                  {usuario.role === "admin" ? "Administrador" : "Escritório"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={logout}
+                className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-signal-400"
+                aria-label="Sair da conta"
+                title="Sair"
+              >
+                <LogOut className="h-[18px] w-[18px]" />
+              </button>
+            </div>
+          )}
           <span className="inline-flex items-center gap-1.5 rounded-full border border-jade-500/30 bg-jade-500/10 px-2.5 py-1 text-[0.7rem] font-500 text-jade-400">
             <ShieldCheck className="h-3.5 w-3.5" strokeWidth={2.2} />
             Documento confidencial

@@ -124,6 +124,24 @@ from app.ratelimit import limiter
 
 router = APIRouter()
 
+
+def _checar_posse_job(job: dict, ctx: Contexto) -> None:
+    """Defesa em profundidade contra IDOR no store em memória.
+
+    O job_id é UUIDv4 (não adivinhável), mas o store é global e compartilhado entre tenants.
+    Com a auth ligada, confirmamos que o job pertence ao escritório do contexto antes de servir
+    ou mutar. ctx.filtro_escritorio=None (admin/auth off) não restringe (vê tudo, comportamento
+    atual). Jobs sem escritorio_id (legado/re-hidratados) caem no default, então só são acessíveis
+    pelo escritório default ou admin. 404 (não 403) para não confirmar a existência do recurso.
+    """
+    filtro = ctx.filtro_escritorio
+    if filtro is None:
+        return
+    dono = job.get("escritorio_id") or settings.escritorio_default_id
+    if dono != filtro:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+
+
 EXTENSOES_VALIDAS = (".xls", ".xlsx")
 _MAX_BYTES = settings.max_upload_mb * 1024 * 1024
 _CHUNK = 1024 * 1024
@@ -232,7 +250,10 @@ async def processar(
 
 @router.post("/enriquecer-cnpj/{job_id}")
 @limiter.limit("6/minute")
-async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = None):
+async def enriquecer_cnpj(
+    request: Request, job_id: str, limite: int | None = None,
+    ctx: Contexto = Depends(contexto_atual),
+):
     """Dispara o enriquecimento de CNPJ em background para TODOS os fornecedores pendentes do job.
 
     Não processa síncrono: inicia uma task que busca por razão social cada pendente (sem CNPJ),
@@ -247,8 +268,10 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
             status_code=400,
             detail="Busca automática de CNPJ temporariamente indisponível. Resolva os pendentes pela busca no banco (grátis) na tabela.",
         )
-    if not store.existe(job_id):
+    job = store.obter(job_id)
+    if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
     if budget.restante("cnpj") <= 0:
         raise HTTPException(status_code=429, detail="Teto diário de buscas de CNPJ atingido.")
 
@@ -263,7 +286,10 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
 
 @router.post("/consultar-cnd/{job_id}")
 @limiter.limit("6/minute")
-async def consultar_cnd_endpoint(request: Request, job_id: str, limite: int | None = None):
+async def consultar_cnd_endpoint(
+    request: Request, job_id: str, limite: int | None = None,
+    ctx: Contexto = Depends(contexto_atual),
+):
     """Inicia a consulta de CND (regularidade fiscal) em background para os fornecedores com CNPJ.
 
     Passo sob demanda e com teto (controle de custo). Acompanhe pelo /progresso/{job_id}.
@@ -273,8 +299,10 @@ async def consultar_cnd_endpoint(request: Request, job_id: str, limite: int | No
             status_code=400,
             detail="Consulta de regularidade (CND) temporariamente indisponível. Tente novamente mais tarde.",
         )
-    if not store.existe(job_id):
+    job = store.obter(job_id)
+    if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
     if budget.restante("cnd") <= 0:
         raise HTTPException(status_code=429, detail="Teto diário de consultas de CND atingido.")
 
@@ -293,11 +321,12 @@ async def consultar_cnd_endpoint(request: Request, job_id: str, limite: int | No
 
 
 @router.get("/resultado/{job_id}", response_model=ProcessarResponse)
-async def resultado_job(job_id: str):
+async def resultado_job(job_id: str, ctx: Contexto = Depends(contexto_atual)):
     """Devolve o estado atual do job (fornecedores atualizados após CNPJ/CND)."""
     job = store.obter(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
 
     fornecedores = job["fornecedores"]
     resumo = dict(job["resumo"])
@@ -314,11 +343,12 @@ async def resultado_job(job_id: str):
 
 
 @router.get("/progresso/{job_id}")
-async def progresso(job_id: str):
+async def progresso(job_id: str, ctx: Contexto = Depends(contexto_atual)):
     """Estado da consulta de CND (para polling do frontend)."""
     job = store.obter(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
     return job.get(
         "cnd_progresso",
         {"total": 0, "consultados": 0, "falhas": 0, "percentual": 0.0, "status": "nao_iniciado"},
@@ -326,11 +356,12 @@ async def progresso(job_id: str):
 
 
 @router.get("/enriquecimento-progresso/{job_id}")
-async def enriquecimento_progresso(job_id: str):
+async def enriquecimento_progresso(job_id: str, ctx: Contexto = Depends(contexto_atual)):
     """Estado do enriquecimento de CNPJ (para polling do frontend)."""
     job = store.obter(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
     return job.get(
         "enriquecimento_progresso",
         {
@@ -352,11 +383,12 @@ async def enriquecimento_progresso(job_id: str):
 
 @router.get("/relatorio/{job_id}")
 @limiter.limit("30/minute")
-async def relatorio(request: Request, job_id: str):
+async def relatorio(request: Request, job_id: str, ctx: Contexto = Depends(contexto_atual)):
     """Gera e devolve o relatório PDF do job (capa, sumário, tabelas por grupo)."""
     job = store.obter(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
 
     try:
         pdf = pdf_generator.gerar_pdf(job)
@@ -379,7 +411,10 @@ async def relatorio(request: Request, job_id: str):
 
 @router.post("/cnpj-manual/{job_id}")
 @limiter.limit("30/minute")
-async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
+async def cnpj_manual(
+    request: Request, job_id: str, body: CnpjManualIn,
+    ctx: Contexto = Depends(contexto_atual),
+):
     """Define manualmente a razão social e o CNPJ de um fornecedor (sem consumir créditos).
 
     Usado para os fornecedores que a busca automática não confirmou. Valida o dígito
@@ -388,6 +423,7 @@ async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
     job = store.obter(job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
 
     # Preserva letras (CNPJ alfanumérico a partir de 2026), valida o DV e normaliza.
     cnpj = re.sub(r"[^0-9A-Za-z]", "", body.cnpj).upper()

@@ -1,6 +1,11 @@
 """Configuração central da aplicação, carregada de variáveis de ambiente."""
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Segredos JWT proibidos quando a auth está ligada (placeholders de dev). Ligar o login com
+# um destes permitiria a qualquer um forjar um token de admin: bloqueia o boot.
+_JWT_SECRETS_PROIBIDOS = {"trocar-em-producao", "dev-secret", "change-me", "secret", ""}
+_JWT_SECRET_MIN_LEN = 32
 
 
 class Settings(BaseSettings):
@@ -91,6 +96,25 @@ class Settings(BaseSettings):
     job_ttl_seconds: int = 3600
     job_cap: int = 200
     rate_limit_processar: str = "5/minute"
+
+    @model_validator(mode="after")
+    def _exige_jwt_secret_forte_com_auth(self) -> "Settings":
+        """Com auth_enabled=True, o segredo do JWT não pode ser placeholder nem curto.
+
+        A flag off mantém o comportamento atual (anônimo, sem JWT real), então não força nada.
+        Ligar a auth com segredo fraco quebraria toda a confiança do token (forja de admin),
+        por isso falhamos no boot em vez de rodar inseguro.
+        """
+        if self.auth_enabled:
+            secret = (self.jwt_secret or "").strip()
+            if secret.lower() in _JWT_SECRETS_PROIBIDOS or len(secret) < _JWT_SECRET_MIN_LEN:
+                raise ValueError(
+                    "JWT_SECRET inseguro: com AUTH_ENABLED=true, defina um segredo forte "
+                    f"(>= {_JWT_SECRET_MIN_LEN} caracteres, não um placeholder)."
+                )
+            if self.jwt_algorithm.lower() == "none":
+                raise ValueError("JWT_ALGORITHM 'none' é proibido (assinatura obrigatória).")
+        return self
 
     @property
     def cors_origins_list(self) -> list[str]:

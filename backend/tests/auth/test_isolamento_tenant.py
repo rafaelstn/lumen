@@ -8,7 +8,10 @@ from fastapi.testclient import TestClient
 
 from app.auth import service
 from app.main import app
+from app.modules.consumo import repo as consumo_repo
+from app.modules.consumo.models import SERVICO_CNPJ
 from app.modules.modulo01 import analises_repo, fornecedores_repo
+from app.modules.modulo01.jobs import store
 from app.modules.modulo02 import repo as m02_repo
 
 
@@ -143,3 +146,163 @@ async def test_carteira_m02_nao_vaza(factory, auth_on):
 
     cnpjs_a = {m["cnpj"] for m in client.get("/api/modulo02/monitorados", headers=_bearer(a["token"]["access_token"])).json()}
     assert cnpjs_a == {"77777777777777"}  # A não vê a carteira de B
+
+
+# --- alertas (gap coberto) ----------------------------------------------------------
+
+
+async def test_alertas_nao_vazam_entre_escritorios(factory, auth_on):
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "ala@a.com")
+    b = _signup(client, "Esc B", "alb@b.com")
+    esc_a = a["usuario"]["escritorio_id"]
+    esc_b = b["usuario"]["escritorio_id"]
+    # Cria um monitorado em cada escritório (o alerta precisa de fornecedor_id válido).
+    await _seed_monitorado(factory, esc_a, "10000000000001", "MON A")
+    await _seed_monitorado(factory, esc_b, "10000000000002", "MON B")
+    async with factory() as s:
+        fa = await m02_repo.obter_por_cnpj(s, esc_a, "10000000000001")
+        fb = await m02_repo.obter_por_cnpj(s, esc_b, "10000000000002")
+        await m02_repo.criar_alerta(s, esc_a, fa.id, "SCORE_CRITICO", "alerta A")
+        await m02_repo.criar_alerta(s, esc_b, fb.id, "SCORE_CRITICO", "alerta B")
+
+    msgs_a = {x["mensagem"] for x in client.get("/api/modulo02/alertas", headers=_bearer(a["token"]["access_token"])).json()}
+    assert msgs_a == {"alerta A"}  # A não vê o alerta de B
+
+
+async def test_admin_ve_alertas_de_todos(factory, auth_on):
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "ala2@a.com")
+    b = _signup(client, "Esc B", "alb2@b.com")
+    esc_a = a["usuario"]["escritorio_id"]
+    esc_b = b["usuario"]["escritorio_id"]
+    await _seed_monitorado(factory, esc_a, "10000000000003", "MON A")
+    await _seed_monitorado(factory, esc_b, "10000000000004", "MON B")
+    async with factory() as s:
+        fa = await m02_repo.obter_por_cnpj(s, esc_a, "10000000000003")
+        fb = await m02_repo.obter_por_cnpj(s, esc_b, "10000000000004")
+        await m02_repo.criar_alerta(s, esc_a, fa.id, "SCORE_CRITICO", "alerta A2")
+        await m02_repo.criar_alerta(s, esc_b, fb.id, "SCORE_CRITICO", "alerta B2")
+        await service.seed_admin(s, "rootal@lumen.com", "rootsenha123")
+    token = client.post("/api/auth/login", json={"email": "rootal@lumen.com", "senha": "rootsenha123"}).json()["access_token"]
+
+    msgs = {x["mensagem"] for x in client.get("/api/modulo02/alertas", headers=_bearer(token)).json()}
+    assert {"alerta A2", "alerta B2"} <= msgs
+
+
+# --- consumo / histórico (gap coberto) ---------------------------------------------
+
+
+async def test_consumo_historico_nao_vaza_entre_escritorios(factory, auth_on):
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "ca@a.com")
+    b = _signup(client, "Esc B", "cb@b.com")
+    esc_a = a["usuario"]["escritorio_id"]
+    esc_b = b["usuario"]["escritorio_id"]
+    # Audit trail de consumo em cada escritório (sessão própria do repo).
+    async with factory() as _:  # garante a factory monkeypatchada ativa
+        await consumo_repo.registrar_consulta(
+            escritorio_id=esc_a, modulo="modulo02", servico=SERVICO_CNPJ,
+            operacao="due_diligence", quantidade=3, creditos_consumidos=6, contexto="A",
+        )
+        await consumo_repo.registrar_consulta(
+            escritorio_id=esc_b, modulo="modulo02", servico=SERVICO_CNPJ,
+            operacao="due_diligence", quantidade=7, creditos_consumidos=14, contexto="B",
+        )
+
+    hist_a = client.get("/api/consultas/historico", headers=_bearer(a["token"]["access_token"])).json()
+    # A só vê o próprio consumo: 1 registro de 6 créditos (não enxerga os 14 de B).
+    assert len(hist_a["itens"]) == 1, hist_a
+    assert hist_a["totais"]["creditos_consumidos"] == 6, hist_a
+
+
+# --- 401 sem token (regressão da flag on) -------------------------------------------
+
+
+def test_endpoints_de_dados_exigem_token_com_auth_on(factory, auth_on):
+    client = TestClient(app)
+    # Sem Authorization, todo endpoint de dado retorna 401 (não vaza, não cai no default).
+    assert client.get("/api/modulo01/analises").status_code == 401
+    assert client.get("/api/modulo01/fornecedores").status_code == 401
+    assert client.get("/api/modulo02/monitorados").status_code == 401
+    assert client.get("/api/modulo02/alertas").status_code == 401
+    assert client.get("/api/consultas/saldo").status_code == 401
+
+
+# --- cnpj-manual: posse do job (IDOR de escrita) ------------------------------------
+
+
+async def test_cnpj_manual_nao_muta_job_de_outro_escritorio(factory, auth_on):
+    """Com auth on, A não pode definir o CNPJ manual de um job que pertence a B (404)."""
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "ja@a.com")
+    b = _signup(client, "Esc B", "jb@b.com")
+    esc_b = b["usuario"]["escritorio_id"]
+    # Job vivo no store, dono = B, com um fornecedor pendente de CNPJ.
+    job_id = store.criar(
+        {
+            "status": "parsed",
+            "escritorio_id": esc_b,
+            "metadados": {},
+            "resumo": {},
+            "fornecedores": [{"cod_forn": "F1", "nome_forn": "ACME", "cnpj": None}],
+        }
+    )
+    resp = client.post(
+        f"/api/modulo01/cnpj-manual/{job_id}",
+        json={"cod_forn": "F1", "cnpj": "11444777000161", "razao_social": "INVASOR"},
+        headers=_bearer(a["token"]["access_token"]),
+    )
+    assert resp.status_code == 404  # A não enxerga/altera o job de B
+    # O job de B continua intacto.
+    assert store.obter(job_id)["fornecedores"][0]["cnpj"] is None
+    store.remover(job_id)
+
+
+# --- leitura de job no store: posse (IDOR de leitura) -------------------------------
+
+
+async def test_leitura_job_em_memoria_nao_vaza(factory, auth_on):
+    """A não lê resultado/progresso/relatório de um job vivo que pertence a B (404).
+
+    A posse é checada ANTES de montar o response, então o 404 do intruso independe do shape
+    do payload do job. (Os vetores de leitura compartilham o mesmo _checar_posse_job.)
+    """
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "rja@a.com")
+    b = _signup(client, "Esc B", "rjb@b.com")
+    esc_b = b["usuario"]["escritorio_id"]
+    job_id = store.criar(
+        {
+            "status": "parsed",
+            "escritorio_id": esc_b,
+            "metadados": {"cliente": "Cliente B"},
+            "resumo": {},
+            "fornecedores": [],
+        }
+    )
+    tok_a = _bearer(a["token"]["access_token"])
+    tok_b = _bearer(b["token"]["access_token"])
+    # Intruso (A) leva 404 em cada vetor de leitura do job de B.
+    assert client.get(f"/api/modulo01/resultado/{job_id}", headers=tok_a).status_code == 404
+    assert client.get(f"/api/modulo01/progresso/{job_id}", headers=tok_a).status_code == 404
+    assert client.get(f"/api/modulo01/enriquecimento-progresso/{job_id}", headers=tok_a).status_code == 404
+    assert client.get(f"/api/modulo01/relatorio/{job_id}", headers=tok_a).status_code == 404
+    # Dono (B) NÃO leva 404 de posse (progresso devolve estado, sem schema rígido).
+    assert client.get(f"/api/modulo01/progresso/{job_id}", headers=tok_b).status_code == 200
+    store.remover(job_id)
+
+
+async def test_admin_le_job_de_qualquer_escritorio(factory, auth_on):
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "rja2@a.com")
+    esc_a = a["usuario"]["escritorio_id"]
+    job_id = store.criar(
+        {"status": "parsed", "escritorio_id": esc_a, "metadados": {}, "resumo": {}, "fornecedores": []}
+    )
+    async with factory() as s:
+        await service.seed_admin(s, "rootrj@lumen.com", "rootsenha123")
+    token = client.post("/api/auth/login", json={"email": "rootrj@lumen.com", "senha": "rootsenha123"}).json()["access_token"]
+    # Admin não leva 404 de posse (passa pela checagem, filtro_escritorio=None).
+    assert client.get(f"/api/modulo01/progresso/{job_id}", headers=_bearer(token)).status_code == 200
+    store.remover(job_id)

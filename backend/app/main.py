@@ -110,4 +110,6 @@ app.include_router(consumo.router, prefix="/api/consultas", tags=["Consumo de AP
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.0.0"}
+    # auth_enabled informa ao frontend se deve exigir login (multi-tenant ligado)
+    # ou seguir anônimo (modo atual). Não é segredo.
+    return {"status": "ok", "version": "1.0.0", "auth_enabled": settings.auth_enabled}
