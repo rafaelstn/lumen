@@ -32,8 +32,14 @@ class Settings(BaseSettings):
     cnpj_lookup_provider: str = "cnpja"
     cnpj_lookup_base_url: str = "https://api.cnpja.com"
     cnpj_lookup_api_key: str = ""
-    cnpj_lookup_limite_padrao: int = 20  # teto de fornecedores por chamada (controle de créditos)
+    cnpj_lookup_limite_padrao: int = 8  # teto de fornecedores por chamada (cabe sob o rate sem timeout de request)
     cnpj_lookup_limite_max: int = 200  # clamp do parâmetro 'limite' (anti-abuso)
+    # Rate limit do plano CNPJá (req/min). O lote espaça as chamadas para não estourar 429.
+    cnpj_rate_por_min: int = 10
+    cnpj_rate_folga: float = 0.15  # folga sobre o intervalo mínimo (margem contra jitter de relógio)
+    cnpj_retry_max: int = 2  # tentativas extras no 429 antes de desistir do lote
+    cnpj_retry_backoff_s: float = 2.0  # backoff base do retry quando não há Retry-After
+    cnpj_retry_backoff_teto_s: float = 8.0  # teto do espera por retry (não estourar o request HTTP)
 
     # Consulta de CND (regularidade fiscal) via Infosimples. Token só via env.
     cnd_provider: str = "infosimples"

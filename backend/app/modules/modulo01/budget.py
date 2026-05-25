@@ -36,3 +36,14 @@ def consumir(servico: str, n: int = 1) -> bool:
             return False
         _contadores[chave] = atual + n
         return True
+
+
+def devolver(servico: str, n: int = 1) -> None:
+    """Estorna n consultas reservadas que não chegaram a ocorrer (ex.: 429 antes da chamada).
+
+    Mantém o teto diário fiel ao consumo real: não conta crédito que não foi gasto. Nunca
+    deixa o contador negativo.
+    """
+    chave = (servico, date.today().isoformat())
+    with _lock:
+        _contadores[chave] = max(0, _contadores.get(chave, 0) - n)

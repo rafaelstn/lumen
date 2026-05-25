@@ -78,8 +78,11 @@ async def due_diligence(
 
     resultados = []
     teto_atingido = False
+    limite_taxa_atingido = False
+    creditos_esgotados = False
     consultas_cnpj = 0       # nº de consultas ao CNPJá (2 créditos cada, estimado)
     cnds_concluidas = 0      # nº de CNDs concluídas (1 crédito cada; FALHA não conta)
+    throttle = cnpj_lookup.novo_throttle()
     async with httpx.AsyncClient() as client:
         for c in cnpjs:
             if not _orcamento_ok():
@@ -87,7 +90,20 @@ async def due_diligence(
                 break
             budget.consumir("cnd")
             budget.consumir("cnpj")
-            r = await service.avaliar_cnpj(c, client)
+            try:
+                r = await service.avaliar_cnpj(c, client, throttle=throttle)
+            except cnpj_lookup.RateLimitError:
+                # Rate limit no CNPJá: a CND deste item não rodou. Estorna ambos e para o lote.
+                budget.devolver("cnpj")
+                budget.devolver("cnd")
+                limite_taxa_atingido = True
+                break
+            except cnpj_lookup.LookupError:
+                # Crédito real esgotado (avaliar_cnpj só propaga LookupError nesse caso).
+                budget.devolver("cnpj")
+                budget.devolver("cnd")
+                creditos_esgotados = True
+                break
             consultas_cnpj += 1
             if r.get("status_cnd") and r["status_cnd"] != "FALHA":
                 cnds_concluidas += 1
@@ -98,7 +114,13 @@ async def due_diligence(
         contexto=f"{len(resultados)} cnpj(s)",
     )
     resultados.sort(key=lambda r: r["score"])  # pior score primeiro (maior risco)
-    return {"resultados": resultados, "avaliados": len(resultados), "teto_atingido": teto_atingido}
+    return {
+        "resultados": resultados,
+        "avaliados": len(resultados),
+        "teto_atingido": teto_atingido,
+        "limite_taxa_atingido": limite_taxa_atingido,
+        "creditos_esgotados": creditos_esgotados,
+    }
 
 
 @router.post("/monitorar")
@@ -115,8 +137,20 @@ async def monitorar(request: Request, body: MonitorarIn, escritorio: str = Depen
 
     budget.consumir("cnd")
     budget.consumir("cnpj")
-    async with httpx.AsyncClient() as client:
-        avaliacao = await service.avaliar_cnpj(cnpjs[0], client)
+    try:
+        async with httpx.AsyncClient() as client:
+            avaliacao = await service.avaliar_cnpj(cnpjs[0], client)
+    except cnpj_lookup.RateLimitError:
+        budget.devolver("cnpj")
+        budget.devolver("cnd")
+        raise HTTPException(
+            status_code=429,
+            detail="Limite de consultas por minuto atingido. Aguarde cerca de 1 minuto e tente de novo.",
+        )
+    except cnpj_lookup.LookupError:
+        budget.devolver("cnpj")
+        budget.devolver("cnd")
+        raise HTTPException(status_code=502, detail="Consulta de CNPJ indisponível no momento.")
 
     async with async_session_factory() as session:
         f = await repo.upsert_monitorado(session, escritorio, avaliacao)

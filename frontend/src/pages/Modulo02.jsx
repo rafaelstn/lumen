@@ -254,6 +254,7 @@ function DueDiligence() {
           resultados={resposta.resultados ?? []}
           avaliados={resposta.avaliados}
           tetoAtingido={resposta.teto_atingido}
+          limiteTaxa={resposta.limite_taxa_atingido}
         />
       )}
     </div>
@@ -440,7 +441,7 @@ function ResultadoOrcamento({ rotulo, descricao, totalCent, destaque }) {
   );
 }
 
-function RankingDueDiligence({ resultados, avaliados, tetoAtingido }) {
+function RankingDueDiligence({ resultados, avaliados, tetoAtingido, limiteTaxa }) {
   if (resultados.length === 0) {
     return (
       <EstadoVazio
@@ -462,6 +463,7 @@ function RankingDueDiligence({ resultados, avaliados, tetoAtingido }) {
       </div>
 
       {tetoAtingido && <AvisoTeto />}
+      {limiteTaxa && <AvisoLimiteTaxa />}
 
       <div className="grid gap-4">
         {resultados.map((f, i) => (
@@ -836,6 +838,23 @@ function AvisoTeto({ className = "" }) {
       <span>
         O teto de consultas pagas foi atingido. Parte dos fornecedores pode não ter sido avaliada
         nesta rodada.
+      </span>
+    </div>
+  );
+}
+
+// Rate limit transitório (muitas consultas por minuto). Diferente do teto e de crédito:
+// é só aguardar e avaliar o restante de novo.
+function AvisoLimiteTaxa({ className = "" }) {
+  return (
+    <div
+      className={`flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-700 ${className}`}
+      role="status"
+    >
+      <Clock className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>
+        Muitas consultas em pouco tempo. Aguarde cerca de 1 minuto e avalie o restante de novo.
+        Seu saldo de créditos não acabou.
       </span>
     </div>
   );

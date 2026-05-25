@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, Play, Search, CheckCircle2, Coins } from "lucide-react";
+import { Loader2, Play, Search, CheckCircle2, Coins, Clock } from "lucide-react";
 import { numero, moeda } from "../utils/format.js";
 import { SERVICO } from "../utils/custos.js";
 import ConfirmacaoCusto from "./ConfirmacaoCusto.jsx";
@@ -101,10 +101,22 @@ export default function PainelCnpj({
           <Chip>{numero(resumoEnriquecimento.pendentes_restantes)} ainda pendentes</Chip>
           {resumoEnriquecimento.creditos_esgotados && (
             <span className="rounded-lg border border-signal-200 bg-signal-50 px-2.5 py-1 font-500 text-signal-700">
-              Créditos da API esgotados
+              Créditos esgotados
             </span>
           )}
         </div>
+      )}
+
+      {/* Rate limit (transitório): orienta aguardar e continuar, sem confundir com crédito */}
+      {resumoEnriquecimento?.limite_taxa_atingido && (
+        <p className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <Clock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            Muitas consultas em pouco tempo. Aguarde cerca de 1 minuto e clique em "Buscar" de novo
+            para continuar de onde parou ({numero(resumoEnriquecimento.pendentes_restantes)} ainda
+            pendente(s)). Seu saldo de créditos não acabou.
+          </span>
+        </p>
       )}
 
       {resumoEnriquecimento && (

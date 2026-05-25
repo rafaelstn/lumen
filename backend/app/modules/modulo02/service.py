@@ -10,12 +10,21 @@ from app.modules.modulo01 import budget, cnd, cnpj_lookup
 from app.modules.modulo02 import repo, scorer
 
 
-async def avaliar_cnpj(cnpj: str, client: httpx.AsyncClient) -> dict:
-    """Consulta dados cadastrais + CND e devolve o score fiscal do fornecedor."""
+async def avaliar_cnpj(cnpj: str, client: httpx.AsyncClient, throttle=None) -> dict:
+    """Consulta dados cadastrais + CND e devolve o score fiscal do fornecedor.
+
+    Em lote, passe um throttle (cnpj_lookup.novo_throttle()) para respeitar o rate do plano.
+    Rate limit (RateLimitError) e crédito esgotado propagam para o chamador parar o lote ANTES
+    de gastar a CND (que é consulta paga separada). Falha pontual de dado vira score sem CNPJá.
+    """
     try:
-        dados = await cnpj_lookup.consultar_cnpj(cnpj, client)
-    except cnpj_lookup.LookupError:
-        dados = {}
+        dados = await cnpj_lookup.consultar_cnpj(cnpj, client, throttle=throttle)
+    except cnpj_lookup.RateLimitError:
+        raise  # transitório: o chamador para o lote e pede para aguardar
+    except cnpj_lookup.LookupError as exc:
+        if "rédit" in str(exc):  # crédito real esgotado: para o lote (definitivo)
+            raise
+        dados = {}  # falha pontual de dado: segue com score parcial
 
     cnd_res = await cnd.consultar_cnd(cnpj, client)
 
@@ -45,8 +54,10 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
     """
     monitorados = await repo.listar_monitorados(session, escritorio_id)
     reavaliados, alertas, teto_atingido = 0, 0, False
+    limite_taxa_atingido = False
     consultas_cnpj, cnds_concluidas = 0, 0
 
+    throttle = cnpj_lookup.novo_throttle()
     async with httpx.AsyncClient() as client:
         for f in monitorados:
             if budget.restante("cnd") <= 0 or budget.restante("cnpj") <= 0:
@@ -55,7 +66,15 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
             budget.consumir("cnd")
             budget.consumir("cnpj")
             status_anterior = f.status_cnd_atual
-            avaliacao = await service_avaliar(client, f.cnpj)
+            try:
+                avaliacao = await service_avaliar(client, f.cnpj, throttle)
+            except cnpj_lookup.LookupError as exc:
+                # Rate limit (RateLimitError) ou crédito esgotado: a CND deste item não rodou.
+                # Estorna ambos e para a reavaliação preservando o que já foi atualizado.
+                budget.devolver("cnpj")
+                budget.devolver("cnd")
+                limite_taxa_atingido = isinstance(exc, cnpj_lookup.RateLimitError)
+                break
             await repo.upsert_monitorado(session, escritorio_id, avaliacao)
             reavaliados += 1
             consultas_cnpj += 1
@@ -89,8 +108,13 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
         import logging
         logging.getLogger("modulo02").warning("Falha ao registrar consumo da reavaliação.", exc_info=True)
 
-    return {"reavaliados": reavaliados, "alertas_gerados": alertas, "teto_atingido": teto_atingido}
+    return {
+        "reavaliados": reavaliados,
+        "alertas_gerados": alertas,
+        "teto_atingido": teto_atingido,
+        "limite_taxa_atingido": limite_taxa_atingido,
+    }
 
 
-async def service_avaliar(client, cnpj):
-    return await avaliar_cnpj(cnpj, client)
+async def service_avaliar(client, cnpj, throttle=None):
+    return await avaliar_cnpj(cnpj, client, throttle=throttle)

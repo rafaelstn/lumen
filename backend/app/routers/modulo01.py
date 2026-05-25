@@ -160,8 +160,10 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     """Busca o CNPJ por razão social dos fornecedores pendentes de um job (consome créditos).
 
     Passo sob demanda e com teto (controle de custo): a classificação não consome
-    créditos; só esta chamada consulta a API externa. Para no primeiro sinal de
-    créditos esgotados, preservando o que já casou.
+    créditos; só esta chamada consulta a API externa. As chamadas são espaçadas (throttle)
+    para respeitar o rate do plano CNPJá. Distingue crédito real esgotado (definitivo) de
+    rate limit (transitório): no rate limit, para o lote preservando o que já casou e pede
+    para aguardar ~1 min e tentar de novo.
     """
     if not settings.cnpj_lookup_api_key:
         raise HTTPException(
@@ -181,19 +183,28 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     contagem = {"processados": 0, "confirmados": 0, "baixa_confianca": 0, "ambiguos": 0, "nao_encontrados": 0}
     erros_pontuais = 0
     creditos_esgotados = False
+    limite_taxa_atingido = False
     teto_diario_atingido = False
     achados: dict[str, tuple[str, bool, str]] = {}  # cod_forn -> (cnpj, confirmado, nome_oficial)
 
+    throttle = cnpj_lookup.novo_throttle()
     async with httpx.AsyncClient() as client:
         for cod_forn, nome in pendentes:
             if not budget.consumir("cnpj"):
                 teto_diario_atingido = True
                 break
             try:
-                r = await cnpj_lookup.buscar_por_nome(nome, None, client)
+                r = await cnpj_lookup.buscar_por_nome(nome, None, client, throttle=throttle)
+            except cnpj_lookup.RateLimitError:
+                # Rate limit (transitório): NÃO é crédito esgotado. Para o lote, preserva o
+                # que já casou e devolve a busca não feita para o crédito não ser cobrado à toa.
+                limite_taxa_atingido = True
+                budget.devolver("cnpj")
+                break
             except cnpj_lookup.LookupError as exc:
-                if "créditos" in str(exc) or "Limite" in str(exc):
+                if "rédit" in str(exc):  # crédito real esgotado (definitivo)
                     creditos_esgotados = True
+                    budget.devolver("cnpj")
                     break
                 erros_pontuais += 1
                 continue
@@ -235,6 +246,7 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
         **contagem,
         "erros_pontuais": erros_pontuais,
         "creditos_esgotados": creditos_esgotados,
+        "limite_taxa_atingido": limite_taxa_atingido,
         "teto_diario_atingido": teto_diario_atingido,
         "pendentes_restantes": pendentes_restantes,
     }
