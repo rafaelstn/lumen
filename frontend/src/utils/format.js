@@ -10,20 +10,6 @@ export function moeda(valor) {
   return brl.format(Number(valor) || 0);
 }
 
-// Moeda com mais casas decimais, para preços por crédito que custam fração de
-// centavo (ex.: R$ 0,0250/crédito). Sem isso, o BRL padrão arredondaria para
-// R$ 0,03 e esconderia a fração. Mostra de 2 até `casas` decimais.
-const brlPreciso = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "BRL",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 4,
-});
-
-export function moedaPreciso(valor) {
-  return brlPreciso.format(Number(valor) || 0);
-}
-
 // Versão compacta para KPIs (ex.: R$ 1,2 mi) — evita estourar o card.
 export function moedaCompacta(valor) {
   return brlCompacto.format(Number(valor) || 0);
@@ -60,14 +46,6 @@ export const CORES_GRUPO = {
   B: "bg-amber-50 text-amber-700 border-amber-200",
   C: "bg-signal-50 text-signal-700 border-signal-200",
   INDEFINIDO: "bg-slate-100 text-slate-600 border-slate-300",
-};
-
-// Variante "sólida" para badges de destaque (header de grupo, legendas do gráfico).
-export const CORES_GRUPO_SOLIDA = {
-  A: "bg-jade-600 text-white",
-  B: "bg-amber-500 text-white",
-  C: "bg-signal-600 text-white",
-  INDEFINIDO: "bg-slate-400 text-white",
 };
 
 // Cor base (hex) de cada grupo, usada no donut e barras do Recharts.

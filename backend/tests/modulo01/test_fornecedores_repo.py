@@ -7,7 +7,7 @@ entrada, de graça.
 """
 import pytest
 
-from app.models.fornecedor import Fornecedor, FornecedorAlias
+from app.models.fornecedor import FornecedorAlias
 from app.modules.modulo01 import cnpj_lookup, fornecedores_repo
 
 CNPJ_X = "12345678000199"

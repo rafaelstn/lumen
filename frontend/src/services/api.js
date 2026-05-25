@@ -257,32 +257,10 @@ export async function listarAlertas() {
   return data;
 }
 
-// ---- CONSUMO & CUSTOS — controle de saldo das APIs pagas ---------------
-// Saldo por controle interno: o usuário informa quanto comprou (recarga) e o
-// servidor desconta o consumo real. Sempre devolve os dois serviços (cnpj e cnd).
-// Aritmética monetária no backend é em centavos inteiros.
-
-// Saldo atual: { itens: [{ servico, creditos_comprados, creditos_consumidos,
-//   creditos_restantes, valor_total_pago_centavos, preco_por_credito (string
-//   decimal em centavos, ex "2.499"), custo_restante_centavos }] }.
-export async function getSaldo() {
-  const { data } = await api.get("/consultas/saldo");
-  return data;
-}
-
-// Registra uma compra de créditos (acumula, não substitui). A recarga é por
-// VALOR TOTAL PAGO pelo pacote, não por preço unitário: o crédito custa fração
-// de centavo (R$ 0,024990) e não cabe em centavo inteiro; o valor do pacote é exato.
-// { servico, creditos, valor_total_centavos } -> { servico, creditos_comprados,
-//   valor_total_pago_centavos, preco_por_credito (string), atualizado_em }.
-export async function recarregar({ servico, creditos, valor_total_centavos }) {
-  const { data } = await api.post("/consultas/recarga", {
-    servico,
-    creditos,
-    valor_total_centavos,
-  });
-  return data;
-}
+// ---- CONSUMO & CUSTOS — histórico de consultas pagas -------------------
+// O controle de saldo/recarga foi removido da UI (o saldo real é acompanhado no
+// painel do provedor). Aqui ficou só o histórico de consumo, que o sistema
+// registra de forma confiável a cada consulta paga.
 
 // Histórico de consultas no período (datas opcionais YYYY-MM-DD):
 // { itens: [...], totais: {creditos_consumidos, custo_centavos}, por_dia: [...], por_mes: [...] }.

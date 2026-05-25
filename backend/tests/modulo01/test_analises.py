@@ -3,7 +3,6 @@
 Cobre o repo (analises_repo) sobre o SQLite da fixture `session` e os endpoints via TestClient com
 factory em memória compartilhada (StaticPool), espelhando test_fornecedor_endpoint.
 """
-import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

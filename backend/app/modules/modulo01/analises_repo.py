@@ -8,7 +8,7 @@ banco falhar): o dado essencial vive no JobStore em memória; o histórico é um
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.analise import Analise

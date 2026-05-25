@@ -3,7 +3,6 @@
 Cobre o repo (listar_paginado) sobre a fixture `session` e o endpoint GET /api/modulo01/fornecedores
 via TestClient com factory em memória compartilhada (StaticPool).
 """
-import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

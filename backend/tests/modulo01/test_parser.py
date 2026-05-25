@@ -1,7 +1,6 @@
 """Testes do parser, validados contra o arquivo real (idesan.xls)."""
 from decimal import Decimal
 
-import pytest
 
 from app.modules.modulo01 import parser
 

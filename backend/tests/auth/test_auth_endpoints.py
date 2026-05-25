@@ -5,7 +5,6 @@ Cobre os dois modos da flag onde faz sentido. A isolação multi-tenant tem arqu
 from fastapi.testclient import TestClient
 
 from app.auth import service
-from app.config import settings
 from app.main import app
 
 

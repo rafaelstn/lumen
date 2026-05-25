@@ -3,7 +3,6 @@
 Aponta o async_session_factory do app para um SQLite em memória compartilhado (StaticPool),
 semeia um cadastro e valida o shape de resposta + 404. Sócios só aparecem aqui (LGPD).
 """
-import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine

@@ -1,6 +1,5 @@
 """Testes da consulta CND (Fase 3) com cliente HTTP mockado — não chama a Infosimples."""
 import httpx
-import pytest
 
 from app.modules.modulo01 import cnd
 

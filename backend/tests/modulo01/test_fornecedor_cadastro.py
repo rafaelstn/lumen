@@ -6,7 +6,6 @@ Cobre:
 - obter_cadastro_completo devolve o cadastro + sócios.
 - capital social vai para centavos inteiros (nunca float).
 """
-import pytest
 
 from app.models.fornecedor import Fornecedor, FornecedorSocio
 from app.modules.modulo01 import cnpj_lookup, fornecedores_repo

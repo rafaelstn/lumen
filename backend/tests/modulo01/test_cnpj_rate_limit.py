@@ -4,7 +4,6 @@ Cobrem: distinção rate limit x crédito esgotado, retry com backoff no 429 tra
 e o throttle que espaça as chamadas para não estourar o rate do plano. Cliente HTTP
 mockado — nunca chama a API real. O sleep é stubado para o teste ser rápido.
 """
-import httpx
 import pytest
 
 from app.config import settings

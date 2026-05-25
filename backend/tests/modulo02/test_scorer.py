@@ -1,5 +1,4 @@
 """Testes da engine de score fiscal (Módulo 02), função pura."""
-from datetime import date
 
 from app.modules.modulo02 import scorer
 

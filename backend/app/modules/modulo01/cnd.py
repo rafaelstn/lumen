@@ -215,7 +215,6 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
         logger.warning("CND: job %s expirou antes de aplicar o risco 2027.", job_id)
 
     # Audit trail do consumo do lote de CND. Resiliente: o gasto na Infosimples já ocorreu.
-    from app.config import settings
     from app.modules.consumo import repo as consumo_repo
 
     try:
