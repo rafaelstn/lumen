@@ -47,10 +47,21 @@ export async function definirCnpjManual(jobId, { cod_forn, cnpj, razao_social })
   return data;
 }
 
-// Enriquecimento automático de CNPJ a partir da razão social (assíncrono/sob demanda).
+// Dispara o enriquecimento automático de CNPJ a partir da razão social. Roda no
+// servidor de forma assíncrona; retorna na hora { job_id, status: "iniciado", total }.
+// O progresso é acompanhado via consultarProgressoEnriquecimento (polling).
 export async function enriquecerCnpj(jobId, limite) {
   const params = limite ? { limite } : undefined;
   const { data } = await api.post(`/modulo01/enriquecer-cnpj/${jobId}`, null, { params });
+  return data;
+}
+
+// Snapshot do progresso do enriquecimento de CNPJ:
+// { total, processados, confirmados, baixa_confianca, ambiguos, nao_encontrados,
+//   erros_pontuais, percentual, status ("nao_iniciado" | "em_andamento" | "concluido"),
+//   creditos_esgotados, limite_taxa_atingido, teto_diario_atingido }.
+export async function consultarProgressoEnriquecimento(jobId) {
+  const { data } = await api.get(`/modulo01/enriquecimento-progresso/${jobId}`);
   return data;
 }
 

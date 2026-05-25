@@ -10,16 +10,15 @@ import re
 import tempfile
 from datetime import datetime
 
-import httpx
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 
 from app.config import settings
 from app.database import async_session_factory
-from app.modules.consumo import repo as consumo_repo
 from app.modules.modulo01 import (
     budget,
     cnd,
     cnpj_lookup,
+    enriquecimento,
     fornecedores_repo,
     pdf_generator,
     risk,
@@ -178,105 +177,34 @@ async def processar(
 
 
 @router.post("/enriquecer-cnpj/{job_id}")
-@limiter.limit("3/minute")
+@limiter.limit("6/minute")
 async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = None):
-    """Busca o CNPJ por razão social dos fornecedores pendentes de um job (consome créditos).
+    """Dispara o enriquecimento de CNPJ em background para TODOS os fornecedores pendentes do job.
 
-    Passo sob demanda e com teto (controle de custo): a classificação não consome
-    créditos; só esta chamada consulta a API externa. As chamadas são espaçadas (throttle)
-    para respeitar o rate do plano CNPJá. Distingue crédito real esgotado (definitivo) de
-    rate limit (transitório): no rate limit, para o lote preservando o que já casou e pede
-    para aguardar ~1 min e tentar de novo.
+    Não processa síncrono: inicia uma task que busca por razão social cada pendente (sem CNPJ),
+    espaçando as chamadas com throttle para respeitar o rate do plano CNPJá. Retorna rápido.
+    Acompanhe pelo GET /enriquecimento-progresso/{job_id}; ao concluir, releia /resultado/{job_id}.
+
+    `limite` é só o teto de segurança por job (clamp em cnpj_lookup_limite_max); não há mais
+    teto por clique. A classificação não consome créditos; só esta busca consulta a API externa.
     """
     if not settings.cnpj_lookup_api_key:
         raise HTTPException(
             status_code=400,
             detail="Busca automática de CNPJ temporariamente indisponível. Resolva os pendentes pela busca no banco (grátis) na tabela.",
         )
-
-    job = store.obter(job_id)
-    if job is None:
+    if not store.existe(job_id):
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
     if budget.restante("cnpj") <= 0:
         raise HTTPException(status_code=429, detail="Teto diário de buscas de CNPJ atingido.")
 
-    teto = max(1, min(limite or settings.cnpj_lookup_limite_padrao, settings.cnpj_lookup_limite_max))
-    pendentes = [(f["cod_forn"], f["nome_forn"]) for f in job["fornecedores"] if not f.get("cnpj")][:teto]
-
-    contagem = {"processados": 0, "confirmados": 0, "baixa_confianca": 0, "ambiguos": 0, "nao_encontrados": 0}
-    erros_pontuais = 0
-    creditos_esgotados = False
-    limite_taxa_atingido = False
-    teto_diario_atingido = False
-    # cod_forn -> (cnpj, confirmado, nome_oficial, nome_entrada)
-    achados: dict[str, tuple[str, bool, str, str]] = {}
-
-    throttle = cnpj_lookup.novo_throttle()
-    async with httpx.AsyncClient() as client:
-        for cod_forn, nome in pendentes:
-            if not budget.consumir("cnpj"):
-                teto_diario_atingido = True
-                break
-            try:
-                r = await cnpj_lookup.buscar_por_nome(nome, None, client, throttle=throttle)
-            except cnpj_lookup.RateLimitError:
-                # Rate limit (transitório): NÃO é crédito esgotado. Para o lote, preserva o
-                # que já casou e devolve a busca não feita para o crédito não ser cobrado à toa.
-                limite_taxa_atingido = True
-                budget.devolver("cnpj")
-                break
-            except cnpj_lookup.LookupError as exc:
-                if "rédit" in str(exc):  # crédito real esgotado (definitivo)
-                    creditos_esgotados = True
-                    budget.devolver("cnpj")
-                    break
-                erros_pontuais += 1
-                continue
-            contagem["processados"] += 1
-            conf = r["confianca"]
-            if conf in (cnpj_lookup.CONF_ALTA, cnpj_lookup.CONF_BAIXA):
-                achados[cod_forn] = (r["cnpj"], conf == cnpj_lookup.CONF_ALTA, r.get("nome_oficial") or nome, nome)
-                contagem["confirmados" if conf == cnpj_lookup.CONF_ALTA else "baixa_confianca"] += 1
-            elif conf == cnpj_lookup.CONF_AMBIGUO:
-                contagem["ambiguos"] += 1
-            else:
-                contagem["nao_encontrados"] += 1
-
-    def _aplicar(job: dict) -> None:
-        for f in job["fornecedores"]:
-            if f["cod_forn"] in achados:
-                cnpj, confirmado, _, _ = achados[f["cod_forn"]]
-                f["cnpj"] = cnpj
-                f["cnpj_pendente"] = False
-                f["cnpj_confirmado"] = confirmado
-
-    store.mutar(job_id, _aplicar)
-    # Salva os CNPJ resolvidos no banco para reuso futuro (sem reconsultar a API paga).
-    await _salvar_no_banco([(cnpj, nome_of, "cnpja") for cnpj, _, nome_of, _ in achados.values()])
-    # Registra o alias do NOME DE ENTRADA usado na busca: a re-análise casa de graça
-    # mesmo quando o nome oficial (salvo no Fornecedor) difere da grafia do arquivo.
-    await _registrar_aliases([(nome_entrada, cnpj) for cnpj, _, _, nome_entrada in achados.values()])
-
-    # Audit trail do consumo: cada busca efetivamente feita ao CNPJá consome créditos.
-    try:
-        await consumo_repo.registrar_cnpj(
-            escritorio_id=settings.escritorio_default_id, modulo="modulo01",
-            operacao="enriquecimento", consultas=contagem["processados"], contexto=f"job {job_id[:8]}",
-        )
-    except Exception:
-        logger.warning("Falha ao registrar consumo do enriquecimento (job %s).", job_id[:8], exc_info=True)
-
-    atual = store.obter(job_id)
-    pendentes_restantes = sum(1 for f in atual["fornecedores"] if not f.get("cnpj")) if atual else 0
-    return {
-        "job_id": job_id,
-        **contagem,
-        "erros_pontuais": erros_pontuais,
-        "creditos_esgotados": creditos_esgotados,
-        "limite_taxa_atingido": limite_taxa_atingido,
-        "teto_diario_atingido": teto_diario_atingido,
-        "pendentes_restantes": pendentes_restantes,
-    }
+    teto = max(1, min(limite or settings.cnpj_lookup_limite_max, settings.cnpj_lookup_limite_max))
+    res = enriquecimento.iniciar_enriquecimento_job(job_id, teto)
+    if res["status"] == "nao_encontrado":
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    if res["status"] == "ja_em_andamento":
+        raise HTTPException(status_code=409, detail="Já existe um enriquecimento de CNPJ em andamento para este job.")
+    return {"job_id": job_id, "status": "iniciado", "total": res["total"]}
 
 
 @router.post("/consultar-cnd/{job_id}")
@@ -340,6 +268,31 @@ async def progresso(job_id: str):
     return job.get(
         "cnd_progresso",
         {"total": 0, "consultados": 0, "falhas": 0, "percentual": 0.0, "status": "nao_iniciado"},
+    )
+
+
+@router.get("/enriquecimento-progresso/{job_id}")
+async def enriquecimento_progresso(job_id: str):
+    """Estado do enriquecimento de CNPJ (para polling do frontend)."""
+    job = store.obter(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    return job.get(
+        "enriquecimento_progresso",
+        {
+            "total": 0,
+            "processados": 0,
+            "confirmados": 0,
+            "baixa_confianca": 0,
+            "ambiguos": 0,
+            "nao_encontrados": 0,
+            "erros_pontuais": 0,
+            "percentual": 0.0,
+            "status": "nao_iniciado",
+            "creditos_esgotados": False,
+            "limite_taxa_atingido": False,
+            "teto_diario_atingido": False,
+        },
     )
 
 

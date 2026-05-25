@@ -20,6 +20,7 @@ import {
   enriquecerCnpj,
   consultarCnd,
   consultarProgresso,
+  consultarProgressoEnriquecimento,
   consultarResultado,
   urlRelatorio,
 } from "../services/api.js";
@@ -50,9 +51,13 @@ export default function Modulo01() {
   const [erroCnd, setErroCnd] = useState(null);
   const pollRef = useRef(null);
 
-  // Resumo do enriquecimento automático de CNPJ.
-  const [resumoEnriquecimento, setResumoEnriquecimento] = useState(null);
+  // Estado do enriquecimento automático de CNPJ: progresso vindo do polling + erro de disparo.
+  // progressoEnriquecimento: {total, processados, confirmados, baixa_confianca, ambiguos,
+  //   nao_encontrados, erros_pontuais, percentual, status, creditos_esgotados,
+  //   limite_taxa_atingido, teto_diario_atingido}.
+  const [progressoEnriquecimento, setProgressoEnriquecimento] = useState(null);
   const [erroEnriquecimento, setErroEnriquecimento] = useState(null);
+  const pollEnriqRef = useRef(null);
 
   // Custos unitários efetivos: preço do backend (recarga) quando há saldo
   // configurado, senão o do localStorage. Fonte da verdade do preço = backend.
@@ -82,13 +87,28 @@ export default function Modulo01() {
 
   const enriquecer = useMutation({
     mutationFn: () => enriquecerCnpj(resultado.job_id),
-    onMutate: () => setErroEnriquecimento(null),
-    onSuccess: (resumo) => {
-      setResumoEnriquecimento(resumo);
-      recarregarResultado(resultado.job_id); // reflete os CNPJ encontrados na tabela
+    onMutate: () => {
+      setErroEnriquecimento(null);
+      // Estado inicial otimista para a barra aparecer já no disparo.
+      setProgressoEnriquecimento((p) => p ?? { status: "em_andamento", percentual: 0 });
     },
-    onError: (e) =>
-      setErroEnriquecimento(e?.response?.data?.detail ?? "Não foi possível buscar os CNPJ automaticamente."),
+    onSuccess: (inicio) => {
+      // Disparo assíncrono: NÃO há resumo aqui. O backend devolve { job_id, status, total }.
+      // O acompanhamento passa a ser pelo polling do enriquecimento-progresso.
+      setProgressoEnriquecimento({
+        status: "em_andamento",
+        percentual: 0,
+        total: inicio?.total ?? null,
+        processados: 0,
+      });
+    },
+    onError: (e) => {
+      setErroEnriquecimento(
+        e?.response?.data?.detail ?? "Não foi possível buscar os CNPJ automaticamente.",
+      );
+      setProgressoEnriquecimento(null);
+      pararPollingEnriquecimento();
+    },
   });
 
   const dispararCnd = useMutation({
@@ -107,6 +127,13 @@ export default function Modulo01() {
     if (pollRef.current) {
       clearInterval(pollRef.current);
       pollRef.current = null;
+    }
+  }
+
+  function pararPollingEnriquecimento() {
+    if (pollEnriqRef.current) {
+      clearInterval(pollEnriqRef.current);
+      pollEnriqRef.current = null;
     }
   }
 
@@ -143,7 +170,40 @@ export default function Modulo01() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resultado?.job_id, progresso?.status]);
 
+  // Polling do progresso do enriquecimento de CNPJ a cada 3s. Ref própria
+  // (pollEnriqRef) para coexistir com o polling da CND sem conflito de intervalos.
+  useEffect(() => {
+    if (
+      !resultado?.job_id ||
+      progressoEnriquecimento?.status !== "em_andamento" ||
+      pollEnriqRef.current
+    )
+      return;
+
+    async function tick() {
+      try {
+        const p = await consultarProgressoEnriquecimento(resultado.job_id);
+        setProgressoEnriquecimento(p);
+        if (p.status === "concluido") {
+          pararPollingEnriquecimento();
+          recarregarResultado(resultado.job_id); // reflete os CNPJ casados na tabela
+        } else {
+          // Atualização incremental: os fornecedores casam ao longo da busca.
+          recarregarResultado(resultado.job_id);
+        }
+      } catch {
+        /* tolera falha pontual de polling; tenta de novo no próximo tick */
+      }
+    }
+
+    tick();
+    pollEnriqRef.current = setInterval(tick, 3000);
+    return pararPollingEnriquecimento;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultado?.job_id, progressoEnriquecimento?.status]);
+
   useEffect(() => pararPolling, []);
+  useEffect(() => pararPollingEnriquecimento, []);
 
   const detalheErro =
     processar.error?.response?.data?.detail ??
@@ -152,6 +212,7 @@ export default function Modulo01() {
 
   function reiniciar() {
     pararPolling();
+    pararPollingEnriquecimento();
     setResultado(null);
     processar.reset();
     dispararCnd.reset();
@@ -160,7 +221,7 @@ export default function Modulo01() {
     setErroCnd(null);
     setErroCnpj(null);
     enriquecer.reset();
-    setResumoEnriquecimento(null);
+    setProgressoEnriquecimento(null);
     setErroEnriquecimento(null);
   }
 
@@ -293,9 +354,9 @@ export default function Modulo01() {
 
       <PainelCnpj
         pendentes={r.cnpj_pendentes}
-        resumoEnriquecimento={resumoEnriquecimento}
+        progresso={progressoEnriquecimento}
         onEnriquecer={() => enriquecer.mutate()}
-        enriquecendo={enriquecer.isPending}
+        enriquecendo={enriquecer.isPending || progressoEnriquecimento?.status === "em_andamento"}
         erro={erroEnriquecimento}
         custoCadastroCent={custos.cadastroCent}
       />
