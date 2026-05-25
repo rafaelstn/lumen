@@ -134,6 +134,71 @@ async def test_fornecedores_auth_off_ve_todos(factory, auth_off):
     assert {"55555555555555", "66666666666666"} <= cnpjs
 
 
+async def _seed_fornecedor_com_socios(factory, cnpj, razao, escritorio_id, socio):
+    async with factory() as s:
+        await fornecedores_repo.salvar_cadastro(
+            s,
+            {"cnpj": cnpj, "razao_social": razao, "socios": [{"nome": socio, "qualificacao": "Socio"}]},
+            "cnpja",
+        )
+        if escritorio_id:
+            await fornecedores_repo.associar_escritorio(s, escritorio_id, cnpj)
+
+
+async def test_detalhe_fornecedor_nao_vaza_socios_entre_escritorios(factory, auth_on):
+    """A não lê o detalhe (com sócios/PII) de um CNPJ que só B pesquisou: 404 (não 403)."""
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "da@a.com")
+    b = _signup(client, "Esc B", "db@b.com")
+    esc_b = b["usuario"]["escritorio_id"]
+    # CNPJ no cache global, associado SÓ ao escritório B.
+    await _seed_fornecedor_com_socios(factory, "99999999999999", "FORN SO DE B", esc_b, "SOCIO SECRETO")
+
+    # A (que não pesquisou esse CNPJ) leva 404 igual ao de inexistente: não revela existência.
+    resp_a = client.get("/api/modulo01/fornecedor/99999999999999", headers=_bearer(a["token"]["access_token"]))
+    assert resp_a.status_code == 404
+
+    # B (dono) lê o detalhe completo, com sócios.
+    resp_b = client.get("/api/modulo01/fornecedor/99999999999999", headers=_bearer(b["token"]["access_token"]))
+    assert resp_b.status_code == 200
+    assert {s["nome"] for s in resp_b.json()["socios"]} == {"SOCIO SECRETO"}
+
+
+async def test_detalhe_fornecedor_admin_le_qualquer(factory, auth_on):
+    """Admin lê o detalhe de qualquer CNPJ (filtro_escritorio=None), inclusive sem associação."""
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "da2@a.com")
+    await _seed_fornecedor_com_socios(
+        factory, "12121212121212", "FORN A", a["usuario"]["escritorio_id"], "SOCIO A"
+    )
+    async with factory() as s:
+        await service.seed_admin(s, "rootdet@lumen.com", "rootsenha123")
+    token = client.post(
+        "/api/auth/login", json={"email": "rootdet@lumen.com", "senha": "rootsenha123"}
+    ).json()["access_token"]
+
+    resp = client.get("/api/modulo01/fornecedor/12121212121212", headers=_bearer(token))
+    assert resp.status_code == 200
+    assert {s["nome"] for s in resp.json()["socios"]} == {"SOCIO A"}
+
+
+async def test_busca_fornecedores_visao_isolada(factory, auth_on):
+    """A busca por nome respeita a visão isolada: A só encontra os CNPJs que ELE pesquisou."""
+    client = TestClient(app)
+    a = _signup(client, "Esc A", "ba@a.com")
+    b = _signup(client, "Esc B", "bb@b.com")
+    esc_a = a["usuario"]["escritorio_id"]
+    esc_b = b["usuario"]["escritorio_id"]
+    # Nomes com prefixo comum (>=3 chars) para a busca casar; um por escritório.
+    await _seed_fornecedor(factory, "13131313131313", "TESTE ALFA LTDA", esc_a)
+    await _seed_fornecedor(factory, "14141414141414", "TESTE BETA LTDA", esc_b)
+
+    cnpjs_a = {f["cnpj"] for f in client.get(
+        "/api/modulo01/fornecedores/buscar?q=teste", headers=_bearer(a["token"]["access_token"])
+    ).json()["resultados"]}
+    assert cnpjs_a == {"13131313131313"}  # A não encontra o de B na busca
+
+
 # --- carteira M02 ------------------------------------------------------------------
 
 

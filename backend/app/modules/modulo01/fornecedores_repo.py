@@ -193,6 +193,28 @@ async def associar_escritorio(session: AsyncSession, escritorio_id: str, cnpj: s
     await session.commit()
 
 
+async def escritorio_tem_fornecedor(
+    session: AsyncSession, escritorio_id: str, cnpj: str
+) -> bool:
+    """Diz se ESTE escritório pesquisou/associou um CNPJ (visão isolada do cache global).
+
+    Usado pelo detalhe sob demanda para decidir se o escritório comum pode ler o cadastro
+    completo (com sócios) de um CNPJ. Tolerante: campo vazio = False. Não é chamado para
+    admin/auth off (esses casos não filtram e veem tudo).
+    """
+    escritorio_id = (escritorio_id or "").strip()
+    cnpj = (cnpj or "").strip()
+    if not escritorio_id or not cnpj:
+        return False
+    res = await session.execute(
+        select(EscritorioFornecedor.id).where(
+            EscritorioFornecedor.escritorio_id == escritorio_id,
+            EscritorioFornecedor.cnpj == cnpj,
+        )
+    )
+    return res.scalar_one_or_none() is not None
+
+
 async def registrar_cnd(
     session: AsyncSession,
     cnpj: str,

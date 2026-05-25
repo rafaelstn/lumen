@@ -94,7 +94,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="Sistema de Análise Fiscal", version="1.0.0", lifespan=lifespan)
+# Com auth ligado (produção, dado fiscal de terceiros) o schema interativo fica fechado:
+# /docs, /redoc e /openapi.json dão um mapa da superfície da API a um atacante. Com auth
+# desligado (modo interno/dev atual) mantém aberto para inspeção.
+_docs_kwargs = (
+    {"docs_url": None, "redoc_url": None, "openapi_url": None} if settings.auth_enabled else {}
+)
+app = FastAPI(
+    title="Sistema de Análise Fiscal", version="1.0.0", lifespan=lifespan, **_docs_kwargs
+)
 
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)

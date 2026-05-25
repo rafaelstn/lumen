@@ -491,15 +491,22 @@ async def cnpj_manual(
 
 @router.get("/fornecedores/buscar")
 @limiter.limit("60/minute")
-async def buscar_fornecedores(request: Request, q: str = ""):
+async def buscar_fornecedores(
+    request: Request, q: str = "", ctx: Contexto = Depends(contexto_atual)
+):
     """Busca gratuita no banco de fornecedores (cache local) por razão social.
 
     Listagem ampla: devolve só identidade (cnpj/razão/origem). NUNCA inclui sócios
     (dado pessoal de terceiros, LGPD) — esses só no detalhe sob demanda.
+
+    VISÃO ISOLADA: o escritório comum só vê os CNPJs que ELE pesquisou; admin e auth off
+    (filtro_escritorio=None) veem tudo. Mesmo padrão da listagem /fornecedores.
     """
     try:
         async with async_session_factory() as session:
-            forns = await fornecedores_repo.buscar(session, q)
+            forns = await fornecedores_repo.buscar(
+                session, q, escritorio_id=ctx.filtro_escritorio
+            )
     except Exception:
         raise HTTPException(status_code=503, detail="Busca de fornecedores temporariamente indisponível.")
     return {
@@ -670,20 +677,36 @@ async def listar_fornecedores_global(
 
 @router.get("/fornecedor/{cnpj}")
 @limiter.limit("60/minute")
-async def fornecedor_detalhe(request: Request, cnpj: str):
+async def fornecedor_detalhe(
+    request: Request, cnpj: str, ctx: Contexto = Depends(contexto_atual)
+):
     """Cadastro completo de um fornecedor já gravado no banco (endereço, contato, atividade, sócios).
 
     Detalhe SOB DEMANDA: é o único ponto que devolve o quadro societário (dado pessoal de
-    terceiros, LGPD). Não consome créditos (lê do cache local). 404 se o CNPJ não existir.
+    terceiros, LGPD). Não consome créditos (lê do cache local).
+
+    VISÃO ISOLADA: o cache é global, mas cada escritório só lê o detalhe (com sócios) dos CNPJs
+    que ELE pesquisou (associação escritorio_fornecedor). Admin e auth off (filtro_escritorio=None)
+    veem tudo. Para o escritório comum, CNPJ não associado responde 404 (não 403): não revela a
+    existência do cadastro no cache de outro escritório.
     """
     # Normaliza preservando letras (CNPJ alfanumérico a partir de 2026), só remove o que
     # não é alfanumérico. Não valida DV: é leitura no banco, casa pelo que está gravado.
     chave = re.sub(r"[^0-9A-Za-z]", "", cnpj or "").upper()
     if not chave:
         raise HTTPException(status_code=404, detail="Fornecedor não encontrado.")
+    filtro = ctx.filtro_escritorio
     try:
         async with async_session_factory() as session:
+            # Escritório comum: só acessa o detalhe se associou esse CNPJ. A checagem vem ANTES
+            # de montar o cadastro, e o 404 é igual ao de inexistente (não vaza existência).
+            if filtro is not None and not await fornecedores_repo.escritorio_tem_fornecedor(
+                session, filtro, chave
+            ):
+                raise HTTPException(status_code=404, detail="Fornecedor não encontrado.")
             cadastro = await fornecedores_repo.obter_cadastro_completo(session, chave)
+    except HTTPException:
+        raise
     except Exception:
         raise HTTPException(status_code=503, detail="Consulta de fornecedor temporariamente indisponível.")
     if cadastro is None:

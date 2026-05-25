@@ -1,4 +1,7 @@
-fastapi==0.111.0
+# fastapi subido de 0.111.0 para trazer starlette>=0.40 (CVE-2024-47874 DoS no multipart e
+# correções de parsing de formulário). Suíte completa (171) + boot do app verdes em 0.115.14
+# com starlette 0.46.2. Teto <0.116 para não pegar minor não validada.
+fastapi>=0.115.14,<0.116.0
 uvicorn[standard]==0.29.0
 pandas==2.2.2
 xlrd==2.0.1
@@ -8,15 +11,15 @@ weasyprint==62.3
 # a geração com "'super' object has no attribute 'transform'").
 pydyf==0.10.0
 pillow==10.4.0
-jinja2==3.1.4
+jinja2>=3.1.6
 sqlalchemy==2.0.30
 asyncpg==0.29.0
 python-dotenv==1.0.1
 httpx==0.27.0
-python-multipart==0.0.9
+python-multipart>=0.0.18
 pydantic-settings==2.2.1
 slowapi==0.1.9
-pyjwt==2.8.0
+pyjwt>=2.12.0
 bcrypt==4.1.3
 email-validator==2.1.1
 apscheduler==3.10.4

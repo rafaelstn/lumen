@@ -183,6 +183,12 @@ def _so_digitos(valor: str | None) -> str:
     return re.sub(r"\D", "", valor or "")
 
 
+def _mascara_cnpj(cnpj: str | None) -> str:
+    """Mascara o CNPJ para log (não expõe o número completo). Consistente com cnd._mascara_cnpj."""
+    d = re.sub(r"\D", "", cnpj or "")
+    return f"{d[:2]}.***.***/{d[-2:]}" if len(d) == 14 else "***"
+
+
 def _capital_para_centavos(equity) -> int | None:
     """Converte o capital social (reais, vindo como número/None) para centavos (inteiro).
 
@@ -366,7 +372,7 @@ async def consultar_cnpj(
     d = resp.json()
     status = d.get("status", {})
     simples = d.get("company", {}).get("simples", {})
-    logger.info("cnpj_lookup consulta cnpj=%s situacao=%s", so_digitos, status.get("text"))
+    logger.info("cnpj_lookup consulta cnpj=%s situacao=%s", _mascara_cnpj(so_digitos), status.get("text"))
     return {
         "cnpj": so_digitos,
         "encontrado": True,

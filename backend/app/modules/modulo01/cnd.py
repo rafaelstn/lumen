@@ -217,9 +217,14 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
     # Audit trail do consumo do lote de CND. Resiliente: o gasto na Infosimples já ocorreu.
     from app.modules.consumo import repo as consumo_repo
 
+    # Tenant dono do job (multi-tenant). Fallback no default preserva o comportamento quando
+    # a flag de auth está desligada. Espelha o enriquecimento: o custo é atribuído a quem gastou.
+    job_atual = store.obter(job_id) or {}
+    escritorio_id = job_atual.get("escritorio_id") or settings.escritorio_default_id
+
     try:
         await consumo_repo.registrar_cnd(
-            escritorio_id=settings.escritorio_default_id, modulo="modulo01",
+            escritorio_id=escritorio_id, modulo="modulo01",
             operacao="cnd_lote", consultas_concluidas=capturado.get("concluidas", 0),
             contexto=f"job {job_id[:8]}",
         )

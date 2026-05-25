@@ -14,6 +14,12 @@ http {
         root /usr/share/nginx/html;
         index index.html;
 
+        # Security headers baratos e seguros. CSP completa fica para uma calibração
+        # dedicada (precisa casar com os assets do app); HSTS é tratado na borda do Railway.
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+
         # SPA: qualquer rota cai no index.html (React Router client-side).
         location / {
             try_files $uri $uri/ /index.html;
