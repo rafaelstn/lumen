@@ -17,6 +17,7 @@ import {
   CORES_GRUPO,
   statusCndMeta,
   riscoMeta,
+  formatarCnpj,
 } from "../utils/format.js";
 import { buscarFornecedores } from "../services/api.js";
 
@@ -46,7 +47,9 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
 
   function abrir(f) {
     setEditando(f.cod_forn);
-    setCnpj("");
+    // Pré-preenche com o CNPJ atual (caso de revisar/confirmar um não confirmado);
+    // vazio quando ainda não há CNPJ (caso de resolver do zero).
+    setCnpj(f.cnpj || "");
     setRazao(f.nome_forn || "");
   }
 
@@ -193,7 +196,10 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
           <span className="font-500 text-ink-800">{f.nome_forn}</span>
           <div className="flex flex-wrap items-center gap-1.5">
             {f.verificar_st && (
-              <span className="inline-flex items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-amber-700">
+              <span
+                className="inline-flex cursor-help items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-amber-700"
+                title="Alíquota cheia cadastrada, mas o ICMS veio zerado nas notas deste fornecedor. Provável Substituição Tributária (o ICMS já foi recolhido antes na cadeia, então não gera crédito), ou erro de lançamento. Confira a nota de entrada: CFOP de ST (ex. 1403, 1411) e o campo ICMS ST. Se for ST, essas compras não dão crédito."
+              >
                 <AlertTriangle className="h-3 w-3" /> Verificar ST
               </span>
             )}
@@ -212,10 +218,21 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
       {/* CNPJ */}
       <td className="px-4 py-3 align-top">
         {f.cnpj ? (
-          <span className={`tnum inline-flex items-center gap-1.5 ${f.cnpj_confirmado ? "text-jade-700" : "text-slate-600"}`}>
-            {f.cnpj_confirmado && <ShieldCheck className="h-3.5 w-3.5" />}
-            {f.cnpj}
-          </span>
+          <div className="flex flex-col items-start gap-1">
+            <span className={`tnum inline-flex items-center gap-1.5 ${f.cnpj_confirmado ? "text-jade-700" : "text-slate-600"}`}>
+              {f.cnpj_confirmado && <ShieldCheck className="h-3.5 w-3.5" />}
+              {formatarCnpj(f.cnpj)}
+            </span>
+            {!f.cnpj_confirmado && (
+              <button
+                type="button"
+                onClick={onAbrir}
+                className="inline-flex items-center gap-1 rounded-lg border border-dashed border-amber-300 px-2 py-0.5 text-[0.7rem] font-500 text-amber-700 hover:border-amber-400 hover:bg-amber-50"
+              >
+                <Pencil className="h-3 w-3" /> revisar e confirmar
+              </button>
+            )}
+          </div>
         ) : (
           <button
             type="button"
@@ -455,7 +472,7 @@ function BuscaBanco({ termoInicial, onSelecionar }) {
                   <span className="min-w-0">
                     <span className="block truncate text-sm font-500 text-ink-800">{item.razao_social}</span>
                     <span className="tnum block text-xs text-slate-500">
-                      {item.cnpj}
+                      {formatarCnpj(item.cnpj)}
                       {item.origem && <span className="ml-1.5 text-slate-400">· {item.origem}</span>}
                     </span>
                   </span>
