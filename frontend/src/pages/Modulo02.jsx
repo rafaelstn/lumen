@@ -14,6 +14,9 @@ import {
   Building2,
   Clock,
   Inbox,
+  Calculator,
+  HelpCircle,
+  CheckCircle2,
 } from "lucide-react";
 import {
   dueDiligence,
@@ -28,7 +31,9 @@ import {
   statusCndMeta,
   alertaMeta,
   ROTULO_COMPONENTE,
+  moeda,
 } from "../utils/format.js";
+import { useCustosConsulta, orcamento, centavosParaInput } from "../utils/custos.js";
 import ScoreGauge from "../components/ScoreGauge.jsx";
 
 const ABAS = [
@@ -105,8 +110,13 @@ function Cabecalho() {
 // ---- SEÇÃO 1: DUE DILIGENCE EM LOTE -----------------------------------
 function DueDiligence() {
   const [texto, setTexto] = useState("");
+  const [confirmando, setConfirmando] = useState(false);
+  const custos = useCustosConsulta();
 
-  const avaliar = useMutation({ mutationFn: dueDiligence });
+  const avaliar = useMutation({
+    mutationFn: dueDiligence,
+    onSettled: () => setConfirmando(false),
+  });
   const resposta = avaliar.data;
 
   const cnpjs = texto
@@ -114,19 +124,26 @@ function DueDiligence() {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  function submeter() {
+  // Orçamento da fila atual com os custos unitários configurados.
+  const orc = orcamento(cnpjs.length, custos.cadastroCent, custos.cndCent);
+
+  function confirmar() {
     if (cnpjs.length === 0) return;
     avaliar.mutate(cnpjs);
   }
 
   return (
     <div className="space-y-6">
+      <ExplicacaoDueDiligence />
+
+      <CalculadoraOrcamento custos={custos} />
+
       <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
         <div className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink-900 text-jade-400">
             <ScanSearch className="h-4 w-4" />
           </span>
-          <h2 className="font-display text-lg font-600 text-ink-900">Due diligence em lote</h2>
+          <h2 className="font-display text-lg font-600 text-ink-900">Avaliar fornecedores</h2>
         </div>
 
         <label htmlFor="cnpjs-lote" className="mt-4 block text-sm font-500 text-ink-800">
@@ -141,39 +158,86 @@ function DueDiligence() {
           className="mt-2 w-full resize-y rounded-xl border border-slate-300 bg-white p-3.5 font-mono text-sm tnum text-ink-900 placeholder:text-slate-400 transition-colors focus:border-jade-500"
         />
 
-        <p className="mt-2 flex items-start gap-2 text-xs text-slate-400">
-          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
-          <span>
-            Cada CNPJ avaliado consome uma consulta paga. O ranking abaixo lista do pior ao melhor
-            score.
+        {/* Custo por pesquisa, sempre visível */}
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 text-sm">
+          <span className="inline-flex items-center gap-1.5 font-500 text-ink-800">
+            <Wallet className="h-4 w-4 text-jade-600" />
+            Custo por fornecedor:
           </span>
-        </p>
-
-        <ErroConsulta error={avaliar.error} className="mt-4" />
-
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button
-            type="button"
-            onClick={submeter}
-            disabled={cnpjs.length === 0 || avaliar.isPending}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-jade-600 px-5 py-3 text-sm font-600 text-white shadow-lift transition-colors hover:bg-jade-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
-          >
-            {avaliar.isPending ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Avaliando...
-              </>
-            ) : (
-              <>
-                <Play className="h-4 w-4" /> Avaliar
-              </>
-            )}
-          </button>
-          {cnpjs.length > 0 && !avaliar.isPending && (
-            <span className="text-sm text-slate-500">
-              {cnpjs.length} CNPJ{cnpjs.length > 1 ? "s" : ""} na fila
+          <span className="text-ink-900">
+            <strong className="tnum">{moeda(orc.unitarioComCndCent / 100)}</strong> com CND
+          </span>
+          <span className="text-slate-500">
+            <span className="tnum">{moeda(orc.unitarioSemCndCent / 100)}</span> sem CND
+          </span>
+          {custos.cadastroCent === 0 && (
+            <span className="text-xs text-amber-600">
+              (informe o custo do cadastro na calculadora acima)
             </span>
           )}
         </div>
+
+        <ErroConsulta error={avaliar.error} className="mt-4" />
+
+        {/* Confirmação do custo antes de disparar as consultas pagas */}
+        {confirmando && !avaliar.isPending ? (
+          <div
+            className="mt-4 rounded-xl border border-jade-200 bg-jade-50 p-4"
+            role="alertdialog"
+            aria-label="Confirmar avaliação"
+          >
+            <p className="flex items-start gap-2 text-sm text-ink-800">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-jade-600" />
+              <span>
+                Você vai avaliar <strong>{orc.quantidade}</strong> fornecedor
+                {orc.quantidade > 1 ? "es" : ""} com consulta de CND. Custo estimado:{" "}
+                <strong className="tnum">{moeda(orc.totalComCndCent / 100)}</strong> (
+                {moeda(orc.totalSemCndCent / 100)} sem CND). Confirmar?
+              </span>
+            </p>
+            <div className="mt-3.5 flex flex-wrap gap-2.5">
+              <button
+                type="button"
+                onClick={confirmar}
+                className="inline-flex items-center gap-2 rounded-xl bg-jade-600 px-5 py-2.5 text-sm font-600 text-white shadow-lift transition-colors hover:bg-jade-700"
+              >
+                <CheckCircle2 className="h-4 w-4" /> Confirmar e avaliar
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmando(false)}
+                className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-500 text-ink-700 transition-colors hover:bg-white"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => setConfirmando(true)}
+              disabled={cnpjs.length === 0 || avaliar.isPending}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-jade-600 px-5 py-3 text-sm font-600 text-white shadow-lift transition-colors hover:bg-jade-700 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
+            >
+              {avaliar.isPending ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Avaliando...
+                </>
+              ) : (
+                <>
+                  <Play className="h-4 w-4" /> Avaliar
+                </>
+              )}
+            </button>
+            {cnpjs.length > 0 && !avaliar.isPending && (
+              <span className="text-sm text-slate-500">
+                {cnpjs.length} CNPJ{cnpjs.length > 1 ? "s" : ""} na fila ·{" "}
+                <span className="tnum text-ink-700">{moeda(orc.totalComCndCent / 100)}</span> com CND
+              </span>
+            )}
+          </div>
+        )}
       </section>
 
       {avaliar.isPending && (
@@ -187,6 +251,158 @@ function DueDiligence() {
           tetoAtingido={resposta.teto_atingido}
         />
       )}
+    </div>
+  );
+}
+
+// Explica, em linguagem simples, o que é a due diligence (termo técnico).
+function ExplicacaoDueDiligence() {
+  return (
+    <section className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-white p-4 shadow-panel sm:p-5">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-jade-500/10 text-jade-600">
+        <HelpCircle className="h-5 w-5" />
+      </span>
+      <div className="text-sm leading-relaxed text-slate-600">
+        <strong className="text-ink-900">O que é due diligence?</strong> É a verificação da saúde
+        fiscal de um fornecedor antes de fechar negócio: o sistema consulta os dados oficiais do
+        CNPJ (situação cadastral, Simples Nacional) e a certidão de regularidade (CND) e devolve um
+        score de 0 a 100. Quanto menor o score, maior o risco de o fornecedor trazer problema
+        fiscal. Cada consulta é paga, por isso o orçamento abaixo.
+      </div>
+    </section>
+  );
+}
+
+// Calculadora de orçamento: o usuário informa a quantidade e os custos unitários
+// (persistidos) e vê quanto custa avaliar, com e sem CND. Aritmética em centavos.
+function CalculadoraOrcamento({ custos }) {
+  const [qtd, setQtd] = useState("10");
+  const orc = orcamento(Number(qtd) || 0, custos.cadastroCent, custos.cndCent);
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
+      <div className="flex items-center gap-2.5">
+        <span className="grid h-8 w-8 place-items-center rounded-lg bg-ink-900 text-jade-400">
+          <Calculator className="h-4 w-4" />
+        </span>
+        <h2 className="font-display text-lg font-600 text-ink-900">Calculadora de orçamento</h2>
+      </div>
+      <p className="mt-1.5 text-sm text-slate-500">
+        Estime quanto vai custar antes de pesquisar. Ajuste os custos conforme o plano contratado de
+        cada API — eles ficam salvos neste navegador.
+      </p>
+
+      <div className="mt-4 grid gap-3.5 sm:grid-cols-3">
+        <CampoNumero
+          id="orc-qtd"
+          rotulo="Quantos fornecedores?"
+          valor={qtd}
+          onChange={setQtd}
+          inputMode="numeric"
+          placeholder="10"
+        />
+        <CampoReais
+          id="orc-cadastro"
+          rotulo="Custo por consulta de cadastro"
+          dica="CNPJá: 2 créditos (Receita + Simples) ≈ R$ 0,05"
+          centavos={custos.cadastroCent}
+          onChange={custos.definirCadastro}
+        />
+        <CampoReais
+          id="orc-cnd"
+          rotulo="Custo por consulta de CND"
+          dica="Certidão de regularidade (Infosimples)"
+          centavos={custos.cndCent}
+          onChange={custos.definirCnd}
+        />
+      </div>
+
+      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+        <ResultadoOrcamento
+          rotulo="Sem CND"
+          descricao={`${orc.quantidade} × ${moeda(orc.unitarioSemCndCent / 100)}`}
+          totalCent={orc.totalSemCndCent}
+          destaque={false}
+        />
+        <ResultadoOrcamento
+          rotulo="Com CND"
+          descricao={`${orc.quantidade} × ${moeda(orc.unitarioComCndCent / 100)}`}
+          totalCent={orc.totalComCndCent}
+          destaque
+        />
+      </div>
+    </section>
+  );
+}
+
+function CampoNumero({ id, rotulo, valor, onChange, ...rest }) {
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1.5 block text-sm font-500 text-ink-800">
+        {rotulo}
+      </label>
+      <input
+        id={id}
+        type="text"
+        value={valor}
+        onChange={(e) => onChange(e.target.value.replace(/[^\d]/g, ""))}
+        className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 text-sm tnum text-ink-900 placeholder:text-slate-400 transition-colors focus:border-jade-500"
+        {...rest}
+      />
+    </div>
+  );
+}
+
+function CampoReais({ id, rotulo, dica, centavos, onChange }) {
+  // Estado local de texto para o usuário digitar livremente (vírgula, etc.);
+  // o valor canônico em centavos vem do hook persistido.
+  const [texto, setTexto] = useState(() => centavosParaInput(centavos));
+
+  return (
+    <div>
+      <label htmlFor={id} className="mb-1.5 block text-sm font-500 text-ink-800">
+        {rotulo}
+      </label>
+      <div className="relative">
+        <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
+          R$
+        </span>
+        <input
+          id={id}
+          type="text"
+          inputMode="decimal"
+          value={texto}
+          onChange={(e) => {
+            setTexto(e.target.value);
+            onChange(e.target.value);
+          }}
+          onBlur={() => setTexto(centavosParaInput(centavos))}
+          className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3.5 text-sm tnum text-ink-900 transition-colors focus:border-jade-500"
+        />
+      </div>
+      {dica && <p className="mt-1 text-xs text-slate-400">{dica}</p>}
+    </div>
+  );
+}
+
+function ResultadoOrcamento({ rotulo, descricao, totalCent, destaque }) {
+  return (
+    <div
+      className={[
+        "rounded-xl border px-4 py-3.5",
+        destaque ? "border-jade-200 bg-jade-50" : "border-slate-200 bg-slate-50/70",
+      ].join(" ")}
+    >
+      <p className="text-xs font-600 uppercase tracking-wide text-slate-500">{rotulo}</p>
+      <p
+        className={[
+          "tnum mt-0.5 font-display text-2xl font-600",
+          destaque ? "text-jade-700" : "text-ink-900",
+        ].join(" ")}
+      >
+        {moeda(totalCent / 100)}
+      </p>
+      <p className="mt-0.5 text-xs text-slate-400">{descricao}</p>
     </div>
   );
 }
