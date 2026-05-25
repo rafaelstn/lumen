@@ -1,12 +1,29 @@
+import { useState } from "react";
 import { Loader2, Play, Search, CheckCircle2, Coins } from "lucide-react";
-import { numero } from "../utils/format.js";
+import { numero, moeda } from "../utils/format.js";
+import ConfirmacaoCusto from "./ConfirmacaoCusto.jsx";
 
 // Painel de enriquecimento de CNPJ via API CNPJá (PAGA): dispara a busca
 // automática por razão social dos fornecedores pendentes. Consome créditos.
 // A busca gratuita no banco e a correção manual ficam na tabela.
 // Só aparece quando há pendentes.
-export default function PainelCnpj({ pendentes, resumoEnriquecimento, onEnriquecer, enriquecendo, erro }) {
+export default function PainelCnpj({
+  pendentes,
+  resumoEnriquecimento,
+  onEnriquecer,
+  enriquecendo,
+  erro,
+  custoCadastroCent = 0,
+}) {
+  const [confirmando, setConfirmando] = useState(false);
   if (pendentes <= 0 && !resumoEnriquecimento) return null;
+
+  const totalCent = Math.max(0, Math.trunc(pendentes || 0)) * Math.max(0, Math.trunc(custoCadastroCent));
+
+  function confirmar() {
+    setConfirmando(false);
+    onEnriquecer();
+  }
 
   return (
     <section className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5 shadow-panel">
@@ -26,7 +43,8 @@ export default function PainelCnpj({ pendentes, resumoEnriquecimento, onEnriquec
               {pendentes > 0 ? (
                 <>
                   <strong className="tnum font-600">{numero(pendentes)}</strong> fornecedor(es) sem CNPJ casado. Esta busca
-                  consulta a API CNPJá por razão social e <strong className="font-600">consome créditos pagos</strong>. Para
+                  consulta a API CNPJá por razão social e <strong className="font-600">consome créditos pagos</strong>{" "}
+                  (≈ <strong className="tnum font-600">{moeda(totalCent / 100)}</strong> no total). Para
                   resolver sem custo, use a busca no banco (grátis) na tabela abaixo.
                 </>
               ) : (
@@ -36,10 +54,10 @@ export default function PainelCnpj({ pendentes, resumoEnriquecimento, onEnriquec
           </div>
         </div>
 
-        {pendentes > 0 && (
+        {pendentes > 0 && !confirmando && (
           <button
             type="button"
-            onClick={onEnriquecer}
+            onClick={() => setConfirmando(true)}
             disabled={enriquecendo}
             className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-600 text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
           >
@@ -48,6 +66,19 @@ export default function PainelCnpj({ pendentes, resumoEnriquecimento, onEnriquec
           </button>
         )}
       </div>
+
+      {pendentes > 0 && confirmando && (
+        <div className="mt-4">
+          <ConfirmacaoCusto
+            quantidade={pendentes}
+            custoUnitarioCent={custoCadastroCent}
+            descricao="Busca de CNPJ"
+            processando={enriquecendo}
+            onConfirmar={confirmar}
+            onCancelar={() => setConfirmando(false)}
+          />
+        </div>
+      )}
 
       {erro && (
         <p className="mt-3 rounded-lg border border-signal-200 bg-signal-50 px-3 py-2 text-sm text-signal-700">{erro}</p>

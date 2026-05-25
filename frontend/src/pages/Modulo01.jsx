@@ -24,6 +24,7 @@ import {
   urlRelatorio,
 } from "../services/api.js";
 import { moeda, moedaCompacta, numero } from "../utils/format.js";
+import { useCustosConsulta } from "../utils/custos.js";
 import FileUpload from "../components/FileUpload.jsx";
 import ResultCard from "../components/ResultCard.jsx";
 import FornecedoresTable from "../components/FornecedoresTable.jsx";
@@ -31,6 +32,7 @@ import ClienteHeader from "../components/ClienteHeader.jsx";
 import AlertasRisco from "../components/AlertasRisco.jsx";
 import PainelCnpj from "../components/PainelCnpj.jsx";
 import ProgressBar from "../components/ProgressBar.jsx";
+import ConfirmacaoCusto from "../components/ConfirmacaoCusto.jsx";
 
 // Recharts é pesado; carregado sob demanda só quando o dashboard aparece.
 const DistribuicaoGrupos = lazy(() => import("../components/DistribuicaoGrupos.jsx"));
@@ -50,6 +52,9 @@ export default function Modulo01() {
   // Resumo do enriquecimento automático de CNPJ.
   const [resumoEnriquecimento, setResumoEnriquecimento] = useState(null);
   const [erroEnriquecimento, setErroEnriquecimento] = useState(null);
+
+  // Custos unitários das consultas pagas, compartilhados com o M02 (persistidos).
+  const custos = useCustosConsulta();
 
   const processar = useMutation({
     mutationFn: processarArquivos,
@@ -276,6 +281,8 @@ export default function Modulo01() {
           erroCnd={erroCnd}
           disparando={dispararCnd.isPending}
           onDisparar={() => dispararCnd.mutate()}
+          qtdComCnpj={r.cnpj_casados}
+          custoCndCent={custos.cndCent}
         />
       </div>
 
@@ -288,6 +295,7 @@ export default function Modulo01() {
         onEnriquecer={() => enriquecer.mutate()}
         enriquecendo={enriquecer.isPending}
         erro={erroEnriquecimento}
+        custoCadastroCent={custos.cadastroCent}
       />
 
       {erroCnpj && <Alerta tom="erro">{erroCnpj}</Alerta>}
@@ -321,7 +329,15 @@ export default function Modulo01() {
 }
 
 // Bloco da consulta de regularidade fiscal (CND): inicial, em andamento, concluída ou erro.
-function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, onDisparar }) {
+function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, onDisparar, qtdComCnpj, custoCndCent }) {
+  const [confirmando, setConfirmando] = useState(false);
+  const totalCent = Math.max(0, Math.trunc(qtdComCnpj || 0)) * Math.max(0, Math.trunc(custoCndCent || 0));
+
+  function confirmar() {
+    setConfirmando(false);
+    onDisparar();
+  }
+
   return (
     <section className="flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-panel sm:p-6">
       <div className="flex items-center gap-2.5">
@@ -356,15 +372,29 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
               Resultados de CND e risco aplicados à análise. O detalhamento completo por fornecedor consta no relatório PDF.
             </p>
           </div>
+        ) : confirmando ? (
+          <ConfirmacaoCusto
+            quantidade={qtdComCnpj}
+            custoUnitarioCent={custoCndCent}
+            descricao="Consulta de CND"
+            processando={disparando}
+            onConfirmar={confirmar}
+            onCancelar={() => setConfirmando(false)}
+          />
         ) : (
           <div className="text-center">
             <p className="text-sm text-slate-500">
               Consulte a Certidão Negativa de Débitos de cada fornecedor para avaliar o risco de perda de crédito em 2027.
             </p>
+            <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-500">
+              <Coins className="h-3.5 w-3.5 text-amber-500" />
+              Consulta paga · {numero(qtdComCnpj || 0)} com CNPJ ≈{" "}
+              <strong className="tnum text-ink-700">{moeda(totalCent / 100)}</strong>
+            </p>
             <button
               type="button"
-              onClick={onDisparar}
-              disabled={disparando}
+              onClick={() => setConfirmando(true)}
+              disabled={disparando || !qtdComCnpj}
               className="mt-4 inline-flex items-center gap-2 rounded-xl bg-jade-600 px-5 py-2.5 text-sm font-600 text-white transition-colors hover:bg-jade-700 disabled:opacity-50"
             >
               {disparando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
