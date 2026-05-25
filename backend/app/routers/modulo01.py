@@ -166,7 +166,7 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     if not settings.cnpj_lookup_api_key:
         raise HTTPException(
             status_code=400,
-            detail="Busca de CNPJ não configurada (CNPJ_LOOKUP_API_KEY ausente no servidor).",
+            detail="Busca automática de CNPJ temporariamente indisponível. Resolva os pendentes pela busca no banco (grátis) na tabela.",
         )
 
     job = store.obter(job_id)
@@ -250,7 +250,7 @@ async def consultar_cnd_endpoint(request: Request, job_id: str, limite: int | No
     if not settings.infosimples_token:
         raise HTTPException(
             status_code=400,
-            detail="Consulta de CND não configurada (INFOSIMPLES_TOKEN ausente no servidor).",
+            detail="Consulta de regularidade (CND) temporariamente indisponível. Tente novamente mais tarde.",
         )
     if not store.existe(job_id):
         raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")

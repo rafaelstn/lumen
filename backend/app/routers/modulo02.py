@@ -70,7 +70,7 @@ async def due_diligence(
 ):
     """Avalia uma lista de CNPJs (score 0-100) e devolve o ranking (pior primeiro)."""
     if not settings.infosimples_token:
-        raise HTTPException(status_code=400, detail="CND não configurada (INFOSIMPLES_TOKEN ausente).")
+        raise HTTPException(status_code=400, detail="Consulta de regularidade (CND) temporariamente indisponível.")
 
     cnpjs = _normalizar_cnpjs(body.cnpjs)[: settings.cnd_limite_max]
     if not cnpjs:
@@ -106,7 +106,7 @@ async def due_diligence(
 async def monitorar(request: Request, body: MonitorarIn, escritorio: str = Depends(escritorio_atual)):
     """Adiciona um CNPJ à carteira monitorada, avalia e persiste o score."""
     if not settings.infosimples_token:
-        raise HTTPException(status_code=400, detail="CND não configurada (INFOSIMPLES_TOKEN ausente).")
+        raise HTTPException(status_code=400, detail="Consulta de regularidade (CND) temporariamente indisponível.")
     cnpjs = _normalizar_cnpjs([body.cnpj])
     if not cnpjs:
         raise HTTPException(status_code=422, detail="CNPJ inválido.")
@@ -138,7 +138,7 @@ async def monitorar(request: Request, body: MonitorarIn, escritorio: str = Depen
 async def reavaliar(request: Request, escritorio: str = Depends(escritorio_atual)):
     """Re-consulta a carteira monitorada agora (sob demanda), gerando alertas em mudança."""
     if not settings.infosimples_token:
-        raise HTTPException(status_code=400, detail="CND não configurada (INFOSIMPLES_TOKEN ausente).")
+        raise HTTPException(status_code=400, detail="Consulta de regularidade (CND) temporariamente indisponível.")
     async with async_session_factory() as session:
         return await service.reavaliar_carteira(session, escritorio)
 

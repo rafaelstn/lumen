@@ -48,7 +48,7 @@ export default function PainelCnpj({
               {pendentes > 0 ? (
                 <>
                   <strong className="tnum font-600">{numero(pendentes)}</strong> fornecedor(es) sem CNPJ casado. Esta busca
-                  consulta a API CNPJá por razão social e <strong className="font-600">consome créditos pagos</strong>{" "}
+                  consulta a base cadastral oficial por razão social e <strong className="font-600">consome créditos pagos</strong>{" "}
                   (≈ <strong className="tnum font-600">{moeda(totalCent / 100)}</strong> no total). Para
                   resolver sem custo, use a busca no banco (grátis) na tabela abaixo.
                 </>

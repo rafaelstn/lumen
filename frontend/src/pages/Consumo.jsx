@@ -27,19 +27,22 @@ import {
 const SERVICOS = [
   {
     id: SERVICO.CADASTRO, // "cnpj"
-    nome: "CNPJá",
+    nome: "Consulta cadastral",
     descricao: "Dados cadastrais e Simples Nacional",
     Icone: Building2,
   },
   {
     id: SERVICO.CND, // "cnd"
-    nome: "Infosimples (CND)",
+    nome: "Certidão de regularidade (CND)",
     descricao: "Certidão de regularidade fiscal",
     Icone: FileText,
   },
 ];
 
-const NOME_SERVICO = { [SERVICO.CADASTRO]: "CNPJá", [SERVICO.CND]: "Infosimples (CND)" };
+const NOME_SERVICO = {
+  [SERVICO.CADASTRO]: "Consulta cadastral",
+  [SERVICO.CND]: "Certidão de regularidade (CND)",
+};
 
 const ROTULO_OPERACAO = {
   enriquecimento: "Enriquecimento de CNPJ",

@@ -312,8 +312,8 @@ function CalculadoraOrcamento({ custos }) {
           rotulo="Custo por consulta de cadastro"
           dica={
             custos.origemCadastro === "backend"
-              ? "Preço real da última recarga (CNPJá)"
-              : "CNPJá: 2 créditos (Receita + Simples) ≈ R$ 0,05"
+              ? "Preço real da última recarga"
+              : "Consulta cadastral: 2 créditos ≈ R$ 0,05"
           }
           travado={custos.origemCadastro === "backend"}
           centavos={custos.cadastroCent}
@@ -324,8 +324,8 @@ function CalculadoraOrcamento({ custos }) {
           rotulo="Custo por consulta de CND"
           dica={
             custos.origemCnd === "backend"
-              ? "Preço real da última recarga (Infosimples)"
-              : "Certidão de regularidade (Infosimples)"
+              ? "Preço real da última recarga"
+              : "Certidão de regularidade fiscal (CND)"
           }
           travado={custos.origemCnd === "backend"}
           centavos={custos.cndCent}

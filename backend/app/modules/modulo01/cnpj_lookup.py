@@ -102,7 +102,7 @@ def melhor_match(nome_alvo: str, records: list[dict]) -> dict:
 
 def _headers() -> dict:
     if not settings.cnpj_lookup_api_key:
-        raise LookupError("CNPJ_LOOKUP_API_KEY não configurada.")
+        raise LookupError("Serviço de busca de CNPJ não disponível no momento.")
     return {"Authorization": settings.cnpj_lookup_api_key}
 
 
@@ -119,9 +119,9 @@ async def buscar_por_nome(nome: str, uf: str | None, client: httpx.AsyncClient) 
         raise LookupError(f"Falha de rede na consulta de CNPJ: {exc}") from exc
 
     if resp.status_code == 401:
-        raise LookupError("Chave de API do CNPJá inválida.")
+        raise LookupError("Serviço de busca de CNPJ indisponível (credencial).")
     if resp.status_code == 429:
-        raise LookupError("Limite/créditos do CNPJá esgotados.")
+        raise LookupError("Limite de consultas de CNPJ esgotado.")
     if resp.status_code >= 400:
         raise LookupError(f"Erro {resp.status_code} na consulta de CNPJ.")
 
@@ -149,7 +149,7 @@ async def consultar_cnpj(cnpj: str, client: httpx.AsyncClient) -> dict:
     if resp.status_code == 404:
         return {"cnpj": so_digitos, "encontrado": False}
     if resp.status_code == 429:
-        raise LookupError("Limite/créditos do CNPJá esgotados.")
+        raise LookupError("Limite de consultas de CNPJ esgotado.")
     if resp.status_code >= 400:
         raise LookupError(f"Erro {resp.status_code} na consulta de CNPJ.")
 
