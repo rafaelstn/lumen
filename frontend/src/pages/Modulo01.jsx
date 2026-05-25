@@ -24,8 +24,9 @@ import {
   urlRelatorio,
 } from "../services/api.js";
 import { moeda, moedaCompacta, numero } from "../utils/format.js";
-import { useCustosConsulta } from "../utils/custos.js";
+import { useCustosEfetivos, SERVICO } from "../utils/custos.js";
 import FileUpload from "../components/FileUpload.jsx";
+import SaldoInline from "../components/SaldoInline.jsx";
 import ResultCard from "../components/ResultCard.jsx";
 import FornecedoresTable from "../components/FornecedoresTable.jsx";
 import ClienteHeader from "../components/ClienteHeader.jsx";
@@ -53,8 +54,9 @@ export default function Modulo01() {
   const [resumoEnriquecimento, setResumoEnriquecimento] = useState(null);
   const [erroEnriquecimento, setErroEnriquecimento] = useState(null);
 
-  // Custos unitários das consultas pagas, compartilhados com o M02 (persistidos).
-  const custos = useCustosConsulta();
+  // Custos unitários efetivos: preço do backend (recarga) quando há saldo
+  // configurado, senão o do localStorage. Fonte da verdade do preço = backend.
+  const custos = useCustosEfetivos();
 
   const processar = useMutation({
     mutationFn: processarArquivos,
@@ -331,7 +333,11 @@ export default function Modulo01() {
 // Bloco da consulta de regularidade fiscal (CND): inicial, em andamento, concluída ou erro.
 function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, onDisparar, qtdComCnpj, custoCndCent }) {
   const [confirmando, setConfirmando] = useState(false);
-  const totalCent = Math.max(0, Math.trunc(qtdComCnpj || 0)) * Math.max(0, Math.trunc(custoCndCent || 0));
+  // custoCndCent pode ser fracionário (preço derivado do backend): preserva a
+  // fração na multiplicação e arredonda só no total exibido.
+  const totalCent = Math.round(
+    Math.max(0, Math.trunc(qtdComCnpj || 0)) * Math.max(0, Number(custoCndCent) || 0),
+  );
 
   function confirmar() {
     setConfirmando(false);
@@ -377,6 +383,7 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
             quantidade={qtdComCnpj}
             custoUnitarioCent={custoCndCent}
             descricao="Consulta de CND"
+            servico={SERVICO.CND}
             processando={disparando}
             onConfirmar={confirmar}
             onCancelar={() => setConfirmando(false)}
@@ -391,6 +398,9 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
               Consulta paga · {numero(qtdComCnpj || 0)} com CNPJ ≈{" "}
               <strong className="tnum text-ink-700">{moeda(totalCent / 100)}</strong>
             </p>
+            <div className="mt-1.5 flex justify-center">
+              <SaldoInline servico={SERVICO.CND} consumoPrevisto={qtdComCnpj} />
+            </div>
             <button
               type="button"
               onClick={() => setConfirmando(true)}

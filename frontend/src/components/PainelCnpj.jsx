@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Loader2, Play, Search, CheckCircle2, Coins } from "lucide-react";
 import { numero, moeda } from "../utils/format.js";
+import { SERVICO } from "../utils/custos.js";
 import ConfirmacaoCusto from "./ConfirmacaoCusto.jsx";
 
 // Painel de enriquecimento de CNPJ via API CNPJá (PAGA): dispara a busca
@@ -18,7 +19,11 @@ export default function PainelCnpj({
   const [confirmando, setConfirmando] = useState(false);
   if (pendentes <= 0 && !resumoEnriquecimento) return null;
 
-  const totalCent = Math.max(0, Math.trunc(pendentes || 0)) * Math.max(0, Math.trunc(custoCadastroCent));
+  // custoCadastroCent pode ser fracionário (preço derivado do backend): preserva
+  // a fração na multiplicação e arredonda só no total exibido.
+  const totalCent = Math.round(
+    Math.max(0, Math.trunc(pendentes || 0)) * Math.max(0, Number(custoCadastroCent) || 0),
+  );
 
   function confirmar() {
     setConfirmando(false);
@@ -73,6 +78,7 @@ export default function PainelCnpj({
             quantidade={pendentes}
             custoUnitarioCent={custoCadastroCent}
             descricao="Busca de CNPJ"
+            servico={SERVICO.CADASTRO}
             processando={enriquecendo}
             onConfirmar={confirmar}
             onCancelar={() => setConfirmando(false)}

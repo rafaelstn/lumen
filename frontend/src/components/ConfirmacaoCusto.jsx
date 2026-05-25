@@ -1,20 +1,28 @@
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 import { moeda } from "../utils/format.js";
+import SaldoInline from "./SaldoInline.jsx";
 
 // Painel de confirmação de custo antes de disparar uma consulta paga.
 // Reutilizado pelos pontos pagos do M01 (CND, enriquecimento de CNPJ) e mantém o
 // mesmo padrão visual da confirmação do M02. Cálculo em centavos inteiros.
+// Quando `servico` é informado, mostra o saldo restante real desse serviço
+// junto do custo estimado (o "valor real antes" da pesquisa).
 export default function ConfirmacaoCusto({
   quantidade,
   custoUnitarioCent,
   descricao,
+  servico,
   processando = false,
   onConfirmar,
   onCancelar,
 }) {
   const q = Math.max(0, Math.trunc(Number(quantidade) || 0));
-  const unit = Math.max(0, Math.trunc(custoUnitarioCent || 0));
-  const totalCent = q * unit;
+  // O custo unitário pode chegar fracionário (preço derivado do backend, fração
+  // de centavo): preserva a fração no total e arredonda (ROUND_HALF_UP) só na
+  // exibição. O unitário mostrado também é arredondado para o centavo.
+  const unitExato = Math.max(0, Number(custoUnitarioCent) || 0);
+  const unit = Math.round(unitExato);
+  const totalCent = Math.round(q * unitExato);
 
   return (
     <div
@@ -30,6 +38,11 @@ export default function ConfirmacaoCusto({
           Confirmar?
         </span>
       </p>
+      {servico && (
+        <div className="mt-2 pl-6">
+          <SaldoInline servico={servico} consumoPrevisto={q} />
+        </div>
+      )}
       <div className="mt-3.5 flex flex-wrap gap-2.5">
         <button
           type="button"

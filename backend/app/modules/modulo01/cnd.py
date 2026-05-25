@@ -164,12 +164,29 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
     # Fase 4: calcula o risco 2027 após ter os status de CND.
     from app.modules.modulo01 import risk
 
+    capturado: dict = {}
+
     def finalizar(job: dict) -> None:
         risk.aplicar_risco(job["fornecedores"])
         prog = job.get("cnd_progresso") or {}
         prog["status"] = "concluido"
         prog["percentual"] = 100.0
         job["cnd_progresso"] = prog
+        # CNDs concluídas (com crédito) = consultados - falhas. FALHA não consome crédito.
+        capturado["concluidas"] = max(0, prog.get("consultados", 0) - prog.get("falhas", 0))
 
     if not store.mutar(job_id, finalizar):
         logger.warning("CND: job %s expirou antes de aplicar o risco 2027.", job_id)
+
+    # Audit trail do consumo do lote de CND. Resiliente: o gasto na Infosimples já ocorreu.
+    from app.config import settings
+    from app.modules.consumo import repo as consumo_repo
+
+    try:
+        await consumo_repo.registrar_cnd(
+            escritorio_id=settings.escritorio_default_id, modulo="modulo01",
+            operacao="cnd_lote", consultas_concluidas=capturado.get("concluidas", 0),
+            contexto=f"job {job_id[:8]}",
+        )
+    except Exception:
+        logger.warning("CND: falha ao registrar consumo do lote (job %s).", job_id[:8], exc_info=True)

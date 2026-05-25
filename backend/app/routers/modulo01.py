@@ -15,6 +15,7 @@ from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFil
 
 from app.config import settings
 from app.database import async_session_factory
+from app.modules.consumo import repo as consumo_repo
 from app.modules.modulo01 import (
     budget,
     cnd,
@@ -217,6 +218,15 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     store.mutar(job_id, _aplicar)
     # Salva os CNPJ resolvidos no banco para reuso futuro (sem reconsultar a API paga).
     await _salvar_no_banco([(cnpj, nome_of, "cnpja") for cnpj, _, nome_of in achados.values()])
+
+    # Audit trail do consumo: cada busca efetivamente feita ao CNPJá consome créditos.
+    try:
+        await consumo_repo.registrar_cnpj(
+            escritorio_id=settings.escritorio_default_id, modulo="modulo01",
+            operacao="enriquecimento", consultas=contagem["processados"], contexto=f"job {job_id[:8]}",
+        )
+    except Exception:
+        logger.warning("Falha ao registrar consumo do enriquecimento (job %s).", job_id[:8], exc_info=True)
 
     atual = store.obter(job_id)
     pendentes_restantes = sum(1 for f in atual["fornecedores"] if not f.get("cnpj")) if atual else 0

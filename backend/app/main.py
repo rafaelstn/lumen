@@ -8,7 +8,7 @@ from slowapi.errors import RateLimitExceeded
 
 from app.config import settings
 from app.ratelimit import limiter
-from app.routers import modulo01, modulo02
+from app.routers import consumo, modulo01, modulo02
 
 
 @asynccontextmanager
@@ -20,6 +20,7 @@ async def lifespan(app: FastAPI):
         from app.models import escritorio, fornecedor  # noqa: F401 — registra no metadata
         from app.models.base import Base
         from app.models.escritorio import Escritorio
+        from app.modules.consumo import models as _consumo  # noqa: F401 — registra no metadata
         from app.modules.modulo02 import models as _m02  # noqa: F401 — registra no metadata
 
         async with engine.begin() as conn:
@@ -56,6 +57,7 @@ app.add_middleware(
 app.include_router(modulo01.router, prefix="/api/modulo01", tags=["Módulo 01"])
 if settings.modulo02_enabled:
     app.include_router(modulo02.router, prefix="/api/modulo02", tags=["Módulo 02"])
+app.include_router(consumo.router, prefix="/api/consultas", tags=["Consumo de APIs pagas"])
 
 
 @app.get("/health")

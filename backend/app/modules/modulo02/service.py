@@ -5,6 +5,7 @@ para a CND). O controle de orçamento e o teto por chamada ficam no router.
 """
 import httpx
 
+from app.modules.consumo import repo as consumo_repo
 from app.modules.modulo01 import budget, cnd, cnpj_lookup
 from app.modules.modulo02 import repo, scorer
 
@@ -44,6 +45,7 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
     """
     monitorados = await repo.listar_monitorados(session, escritorio_id)
     reavaliados, alertas, teto_atingido = 0, 0, False
+    consultas_cnpj, cnds_concluidas = 0, 0
 
     async with httpx.AsyncClient() as client:
         for f in monitorados:
@@ -56,6 +58,9 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
             avaliacao = await service_avaliar(client, f.cnpj)
             await repo.upsert_monitorado(session, escritorio_id, avaliacao)
             reavaliados += 1
+            consultas_cnpj += 1
+            if avaliacao.get("status_cnd") and avaliacao["status_cnd"] != "FALHA":
+                cnds_concluidas += 1
 
             if status_anterior and status_anterior != avaliacao["status_cnd"]:
                 await repo.criar_alerta(
@@ -69,6 +74,20 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
                     f"{avaliacao.get('razao_social') or f.cnpj}: score {avaliacao['score']} (risco alto).",
                 )
                 alertas += 1
+
+    # Audit trail do consumo da reavaliação. Resiliente: o gasto na API já ocorreu.
+    try:
+        await consumo_repo.registrar_cnpj(
+            escritorio_id=escritorio_id, modulo="modulo02", operacao="reavaliacao",
+            consultas=consultas_cnpj, contexto=f"{reavaliados} monitorado(s)",
+        )
+        await consumo_repo.registrar_cnd(
+            escritorio_id=escritorio_id, modulo="modulo02", operacao="reavaliacao",
+            consultas_concluidas=cnds_concluidas, contexto=f"{reavaliados} monitorado(s)",
+        )
+    except Exception:
+        import logging
+        logging.getLogger("modulo02").warning("Falha ao registrar consumo da reavaliação.", exc_info=True)
 
     return {"reavaliados": reavaliados, "alertas_gerados": alertas, "teto_atingido": teto_atingido}
 

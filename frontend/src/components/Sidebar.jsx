@@ -5,9 +5,13 @@ import {
   Database,
   Gauge,
   Wallet,
+  Receipt,
   Lock,
   X,
 } from "lucide-react";
+
+// Itens transversais (não pertencem a um módulo específico).
+const TRANSVERSAIS = [{ view: "consumo", rotulo: "Consumo & custos", Icone: Receipt }];
 
 // Estrutura de navegação modular do Lumen. Itens "em breve" ficam bloqueados,
 // servem como roadmap visível dentro do próprio produto.
@@ -112,6 +116,44 @@ export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
               </li>
             ))}
           </ul>
+
+          {/* Seção transversal: ferramentas que valem para todos os módulos */}
+          <div className="mt-5 border-t border-white/5 pt-4">
+            <p className="px-3 pb-1.5 text-[0.65rem] font-600 uppercase tracking-[0.16em] text-slate-500">
+              Geral
+            </p>
+            <ul className="space-y-0.5">
+              {TRANSVERSAIS.map((item) => {
+                const atual = view === item.view;
+                return (
+                  <li key={item.view}>
+                    <button
+                      type="button"
+                      onClick={() => onNavegar(item.view)}
+                      aria-current={atual ? "page" : undefined}
+                      className={[
+                        "group relative flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                        atual
+                          ? "bg-jade-500/12 font-500 text-jade-300"
+                          : "text-slate-300 hover:bg-white/5 hover:text-white",
+                      ].join(" ")}
+                    >
+                      {atual && (
+                        <span className="absolute left-0 top-1/2 h-5 w-0.5 -translate-y-1/2 rounded-full bg-jade-400" />
+                      )}
+                      <item.Icone
+                        className={[
+                          "h-4 w-4 shrink-0 transition-colors",
+                          atual ? "text-jade-400" : "text-slate-500 group-hover:text-jade-400",
+                        ].join(" ")}
+                      />
+                      {item.rotulo}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </nav>
 
         {/* Rodapé */}

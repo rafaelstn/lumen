@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { getSaldo } from "../services/api.js";
 
 // Custos de consulta paga do Módulo 02. Toda aritmética é feita em CENTAVOS
 // inteiros (nunca float) para não perder precisão em valores monetários; a
@@ -37,23 +39,43 @@ export function reaisParaCentavos(texto) {
   return Math.round(n * 100);
 }
 
-// Centavos inteiros -> string editável "0,26" para preencher o input.
+// Centavos -> string editável "0,26" para preencher o input. Arredonda para o
+// centavo (ROUND_HALF_UP via Math.round) porque o custo por consulta derivado do
+// backend pode ser fracionário (ex.: 4,998 centavos = R$ 0,05) e o campo só
+// comporta 2 casas. A fração não se perde no cálculo: o total usa o valor cheio.
 export function centavosParaInput(cent) {
-  return (Math.max(0, Math.trunc(cent)) / 100).toFixed(2).replace(".", ",");
+  return (Math.max(0, Math.round(Number(cent) || 0)) / 100).toFixed(2).replace(".", ",");
+}
+
+// Converte o preco_por_credito do backend (string decimal EM CENTAVOS, ex
+// "2.499" = 2,499 centavos por crédito) num número de centavos para o cálculo.
+// Mantém a fração (não arredonda aqui): o arredondamento só acontece na
+// formatação final, ao multiplicar pela quantidade. Tolera null/vazio/lixo.
+export function precoPorCreditoParaCentavos(valor) {
+  if (valor == null) return 0;
+  const n = Number.parseFloat(String(valor).replace(",", "."));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return n;
 }
 
 // Orçamento de uma quantidade de fornecedores, em centavos. Retorna o total
 // sem CND (só cadastro) e com CND (cadastro + CND).
+//
+// Os custos unitários podem chegar fracionados (preço derivado do backend, ex
+// 4,998 centavos por cadastro quando o crédito custa fração de centavo). A
+// fração é preservada na multiplicação e o arredondamento (ROUND_HALF_UP via
+// Math.round) só acontece no valor final exibido, evitando perder centavos.
+// Os unitários expostos são arredondados apenas para exibição.
 export function orcamento(quantidade, cadastroCent, cndCent) {
   const q = Math.max(0, Math.trunc(Number(quantidade) || 0));
-  const cad = Math.max(0, Math.trunc(cadastroCent || 0));
-  const cnd = Math.max(0, Math.trunc(cndCent || 0));
+  const cad = Math.max(0, Number(cadastroCent) || 0);
+  const cnd = Math.max(0, Number(cndCent) || 0);
   return {
     quantidade: q,
-    unitarioSemCndCent: cad,
-    unitarioComCndCent: cad + cnd,
-    totalSemCndCent: q * cad,
-    totalComCndCent: q * (cad + cnd),
+    unitarioSemCndCent: Math.round(cad),
+    unitarioComCndCent: Math.round(cad + cnd),
+    totalSemCndCent: Math.round(q * cad),
+    totalComCndCent: Math.round(q * (cad + cnd)),
   };
 }
 
@@ -93,4 +115,70 @@ export function useCustosConsulta() {
   );
 
   return { ...custos, definirCadastro, definirCnd };
+}
+
+// Mapeamento entre os "tipos de consulta" da UI e os serviços do backend.
+//   cadastro (dados cadastrais + Simples) -> serviço "cnpj" (CNPJá)
+//   cnd      (certidão de regularidade)   -> serviço "cnd"  (Infosimples)
+export const SERVICO = { CADASTRO: "cnpj", CND: "cnd" };
+
+// Créditos consumidos por UMA consulta de cada tipo. O cadastro (CNPJá
+// /office?simples=true) consome 2 créditos (Receita + Simples); a CND, 1.
+// Usado para converter o preço POR CRÉDITO do backend em custo POR CONSULTA.
+export const CREDITOS_POR_CONSULTA = { [SERVICO.CADASTRO]: 2, [SERVICO.CND]: 1 };
+
+// Chave de cache compartilhada do saldo (react-query).
+export const QUERY_SALDO = ["consultas", "saldo"];
+
+// Hook do saldo das APIs pagas. O backend é a fonte da verdade do saldo e do
+// preço REAL pago (definido na recarga).
+export function useSaldoConsulta() {
+  return useQuery({ queryKey: QUERY_SALDO, queryFn: getSaldo });
+}
+
+// Localiza o item de saldo de um serviço dentro da resposta de getSaldo().
+export function itemSaldo(saldo, servico) {
+  return saldo?.itens?.find((i) => i.servico === servico) ?? null;
+}
+
+// Há saldo CONFIGURADO para o serviço quando o usuário já registrou alguma
+// compra (creditos_comprados > 0). Só nesse caso o preço do backend é confiável.
+export function saldoConfigurado(item) {
+  return !!item && Math.trunc(Number(item.creditos_comprados) || 0) > 0;
+}
+
+// Resolve os custos POR CONSULTA EFETIVOS (em centavos) combinando duas fontes:
+//   - backend (preco_por_credito por serviço, string decimal em centavos): fonte
+//     da verdade quando há compra registrada (preço realmente pago). O custo por
+//     consulta é preco_por_credito × créditos por consulta (2 no cadastro, 1 na CND).
+//     A fração de centavo é PRESERVADA aqui; o arredondamento só ocorre no total.
+//   - localStorage (useCustosConsulta): fallback inicial e edição rápida.
+// Retorna { cadastroCent, cndCent, origemCadastro, origemCnd } onde origem ∈
+// {"backend","local"}, útil para sinalizar ao usuário de onde veio o preço.
+// Os valores podem ser fracionários quando vêm do backend; quem exibe arredonda.
+export function useCustosEfetivos() {
+  const local = useCustosConsulta();
+  const { data: saldo } = useSaldoConsulta();
+
+  const efetivos = useMemo(() => {
+    const itemCad = itemSaldo(saldo, SERVICO.CADASTRO);
+    const itemCnd = itemSaldo(saldo, SERVICO.CND);
+    const usaBackCad = saldoConfigurado(itemCad);
+    const usaBackCnd = saldoConfigurado(itemCnd);
+    return {
+      cadastroCent: usaBackCad
+        ? precoPorCreditoParaCentavos(itemCad.preco_por_credito) *
+          CREDITOS_POR_CONSULTA[SERVICO.CADASTRO]
+        : local.cadastroCent,
+      cndCent: usaBackCnd
+        ? precoPorCreditoParaCentavos(itemCnd.preco_por_credito) *
+          CREDITOS_POR_CONSULTA[SERVICO.CND]
+        : local.cndCent,
+      origemCadastro: usaBackCad ? "backend" : "local",
+      origemCnd: usaBackCnd ? "backend" : "local",
+    };
+  }, [saldo, local.cadastroCent, local.cndCent]);
+
+  // Preserva os setters do localStorage (edição rápida segue funcionando).
+  return { ...efetivos, definirCadastro: local.definirCadastro, definirCnd: local.definirCnd };
 }

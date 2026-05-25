@@ -33,8 +33,9 @@ import {
   ROTULO_COMPONENTE,
   moeda,
 } from "../utils/format.js";
-import { useCustosConsulta, orcamento, centavosParaInput } from "../utils/custos.js";
+import { useCustosEfetivos, orcamento, centavosParaInput, SERVICO } from "../utils/custos.js";
 import ScoreGauge from "../components/ScoreGauge.jsx";
+import SaldoInline from "../components/SaldoInline.jsx";
 
 const ABAS = [
   { id: "due", rotulo: "Due diligence", Icone: ScanSearch },
@@ -111,7 +112,7 @@ function Cabecalho() {
 function DueDiligence() {
   const [texto, setTexto] = useState("");
   const [confirmando, setConfirmando] = useState(false);
-  const custos = useCustosConsulta();
+  const custos = useCustosEfetivos();
 
   const avaliar = useMutation({
     mutationFn: dueDiligence,
@@ -195,6 +196,10 @@ function DueDiligence() {
                 {moeda(orc.totalSemCndCent / 100)} sem CND). Confirmar?
               </span>
             </p>
+            <div className="mt-2 space-y-1 pl-6">
+              <SaldoInline servico={SERVICO.CADASTRO} consumoPrevisto={orc.quantidade} />
+              <SaldoInline servico={SERVICO.CND} consumoPrevisto={orc.quantidade} />
+            </div>
             <div className="mt-3.5 flex flex-wrap gap-2.5">
               <button
                 type="button"
@@ -288,8 +293,9 @@ function CalculadoraOrcamento({ custos }) {
         <h2 className="font-display text-lg font-600 text-ink-900">Calculadora de orçamento</h2>
       </div>
       <p className="mt-1.5 text-sm text-slate-500">
-        Estime quanto vai custar antes de pesquisar. Ajuste os custos conforme o plano contratado de
-        cada API — eles ficam salvos neste navegador.
+        Estime quanto vai custar antes de pesquisar. Quando há recarga registrada em Consumo &amp;
+        custos, o preço real pago vale como referência; caso contrário, ajuste conforme o plano
+        contratado (salvo neste navegador).
       </p>
 
       <div className="mt-4 grid gap-3.5 sm:grid-cols-3">
@@ -304,14 +310,24 @@ function CalculadoraOrcamento({ custos }) {
         <CampoReais
           id="orc-cadastro"
           rotulo="Custo por consulta de cadastro"
-          dica="CNPJá: 2 créditos (Receita + Simples) ≈ R$ 0,05"
+          dica={
+            custos.origemCadastro === "backend"
+              ? "Preço real da última recarga (CNPJá)"
+              : "CNPJá: 2 créditos (Receita + Simples) ≈ R$ 0,05"
+          }
+          travado={custos.origemCadastro === "backend"}
           centavos={custos.cadastroCent}
           onChange={custos.definirCadastro}
         />
         <CampoReais
           id="orc-cnd"
           rotulo="Custo por consulta de CND"
-          dica="Certidão de regularidade (Infosimples)"
+          dica={
+            custos.origemCnd === "backend"
+              ? "Preço real da última recarga (Infosimples)"
+              : "Certidão de regularidade (Infosimples)"
+          }
+          travado={custos.origemCnd === "backend"}
           centavos={custos.cndCent}
           onChange={custos.definirCnd}
         />
@@ -353,15 +369,24 @@ function CampoNumero({ id, rotulo, valor, onChange, ...rest }) {
   );
 }
 
-function CampoReais({ id, rotulo, dica, centavos, onChange }) {
+function CampoReais({ id, rotulo, dica, centavos, onChange, travado = false }) {
   // Estado local de texto para o usuário digitar livremente (vírgula, etc.);
-  // o valor canônico em centavos vem do hook persistido.
+  // o valor canônico em centavos vem do hook persistido ou do backend.
   const [texto, setTexto] = useState(() => centavosParaInput(centavos));
+
+  // Quando o preço vem do backend (travado), o campo reflete o valor real e fica
+  // somente leitura: a alteração se faz por uma nova recarga, não por digitação.
+  const valor = travado ? centavosParaInput(centavos) : texto;
 
   return (
     <div>
-      <label htmlFor={id} className="mb-1.5 block text-sm font-500 text-ink-800">
+      <label htmlFor={id} className="mb-1.5 flex items-center gap-1.5 text-sm font-500 text-ink-800">
         {rotulo}
+        {travado && (
+          <span className="inline-flex items-center rounded-md border border-jade-200 bg-jade-50 px-1.5 py-0.5 text-[0.6rem] font-600 uppercase tracking-wide text-jade-700">
+            real
+          </span>
+        )}
       </label>
       <div className="relative">
         <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">
@@ -371,13 +396,21 @@ function CampoReais({ id, rotulo, dica, centavos, onChange }) {
           id={id}
           type="text"
           inputMode="decimal"
-          value={texto}
+          value={valor}
+          readOnly={travado}
+          aria-readonly={travado}
           onChange={(e) => {
+            if (travado) return;
             setTexto(e.target.value);
             onChange(e.target.value);
           }}
-          onBlur={() => setTexto(centavosParaInput(centavos))}
-          className="w-full rounded-xl border border-slate-300 bg-white py-2.5 pl-9 pr-3.5 text-sm tnum text-ink-900 transition-colors focus:border-jade-500"
+          onBlur={() => !travado && setTexto(centavosParaInput(centavos))}
+          className={[
+            "w-full rounded-xl border py-2.5 pl-9 pr-3.5 text-sm tnum transition-colors",
+            travado
+              ? "cursor-not-allowed border-slate-200 bg-slate-50 text-ink-700"
+              : "border-slate-300 bg-white text-ink-900 focus:border-jade-500",
+          ].join(" ")}
         />
       </div>
       {dica && <p className="mt-1 text-xs text-slate-400">{dica}</p>}

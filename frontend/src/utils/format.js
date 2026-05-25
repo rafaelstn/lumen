@@ -10,6 +10,20 @@ export function moeda(valor) {
   return brl.format(Number(valor) || 0);
 }
 
+// Moeda com mais casas decimais, para preços por crédito que custam fração de
+// centavo (ex.: R$ 0,0250/crédito). Sem isso, o BRL padrão arredondaria para
+// R$ 0,03 e esconderia a fração. Mostra de 2 até `casas` decimais.
+const brlPreciso = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+});
+
+export function moedaPreciso(valor) {
+  return brlPreciso.format(Number(valor) || 0);
+}
+
 // Versão compacta para KPIs (ex.: R$ 1,2 mi) — evita estourar o card.
 export function moedaCompacta(valor) {
   return brlCompacto.format(Number(valor) || 0);
