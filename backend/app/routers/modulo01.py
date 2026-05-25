@@ -31,16 +31,25 @@ logger = logging.getLogger("modulo01")
 
 
 async def _casar_com_banco(fornecedores: list[dict]) -> None:
-    """Preenche o CNPJ dos pendentes a partir do banco de fornecedores (grátis). Tolerante a falha."""
+    """Preenche o CNPJ dos pendentes a partir do banco de fornecedores (grátis). Tolerante a falha.
+
+    Casa pelo nome de entrada do arquivo: alias primeiro (grafia já vista -> cnpj), com
+    fallback na razão social. Nenhuma chamada de API: só nomes nunca vistos seguem pendentes.
+    """
     try:
         async with async_session_factory() as session:
             for f in fornecedores:
                 if not f.get("cnpj"):
-                    fr = await fornecedores_repo.buscar_exato(session, f["nome_forn"])
+                    fr = await fornecedores_repo.casar(session, f["nome_forn"])
                     if fr:
                         f["cnpj"] = fr.cnpj
                         f["cnpj_pendente"] = False
                         f["cnpj_confirmado"] = True
+                        # Metadado de controle da última CND deste CNPJ (não dispara reconsulta;
+                        # só informa o frontend: "CND consultada em X, estava Y" antes de repuxar).
+                        ultima = getattr(fr, "cnd_ultima_consulta", None)
+                        f["cnd_ultima_consulta"] = ultima.isoformat() if ultima else None
+                        f["cnd_status_cache"] = getattr(fr, "cnd_ultimo_status", None)
     except Exception:
         logger.warning("Casamento com o banco de fornecedores indisponível.", exc_info=True)
 
@@ -53,6 +62,20 @@ async def _salvar_no_banco(itens: list[tuple[str, str, str]]) -> None:
                 await fornecedores_repo.upsert(session, cnpj, razao, origem)
     except Exception:
         logger.warning("Não foi possível salvar fornecedor(es) no banco.", exc_info=True)
+
+
+async def _registrar_aliases(itens: list[tuple[str, str]]) -> None:
+    """Registra aliases (nome_entrada -> cnpj) para a re-análise casar de graça. Tolerante a falha.
+
+    O nome de entrada é a grafia do arquivo (ex. "METAL CUT"), que difere do nome oficial
+    salvo no Fornecedor. Sem o alias, a re-análise não casaria e reconsultaria a API paga.
+    """
+    try:
+        async with async_session_factory() as session:
+            for nome_entrada, cnpj in itens:
+                await fornecedores_repo.registrar_alias(session, nome_entrada, cnpj)
+    except Exception:
+        logger.warning("Não foi possível registrar alias(es) de fornecedor.", exc_info=True)
 from app.modules.modulo01.parser import ParserError
 from app.modules.modulo01.schemas import CnpjManualIn, ProcessarResponse
 from app.ratelimit import limiter
@@ -185,7 +208,8 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     creditos_esgotados = False
     limite_taxa_atingido = False
     teto_diario_atingido = False
-    achados: dict[str, tuple[str, bool, str]] = {}  # cod_forn -> (cnpj, confirmado, nome_oficial)
+    # cod_forn -> (cnpj, confirmado, nome_oficial, nome_entrada)
+    achados: dict[str, tuple[str, bool, str, str]] = {}
 
     throttle = cnpj_lookup.novo_throttle()
     async with httpx.AsyncClient() as client:
@@ -211,7 +235,7 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
             contagem["processados"] += 1
             conf = r["confianca"]
             if conf in (cnpj_lookup.CONF_ALTA, cnpj_lookup.CONF_BAIXA):
-                achados[cod_forn] = (r["cnpj"], conf == cnpj_lookup.CONF_ALTA, r.get("nome_oficial") or nome)
+                achados[cod_forn] = (r["cnpj"], conf == cnpj_lookup.CONF_ALTA, r.get("nome_oficial") or nome, nome)
                 contagem["confirmados" if conf == cnpj_lookup.CONF_ALTA else "baixa_confianca"] += 1
             elif conf == cnpj_lookup.CONF_AMBIGUO:
                 contagem["ambiguos"] += 1
@@ -221,14 +245,17 @@ async def enriquecer_cnpj(request: Request, job_id: str, limite: int | None = No
     def _aplicar(job: dict) -> None:
         for f in job["fornecedores"]:
             if f["cod_forn"] in achados:
-                cnpj, confirmado, _ = achados[f["cod_forn"]]
+                cnpj, confirmado, _, _ = achados[f["cod_forn"]]
                 f["cnpj"] = cnpj
                 f["cnpj_pendente"] = False
                 f["cnpj_confirmado"] = confirmado
 
     store.mutar(job_id, _aplicar)
     # Salva os CNPJ resolvidos no banco para reuso futuro (sem reconsultar a API paga).
-    await _salvar_no_banco([(cnpj, nome_of, "cnpja") for cnpj, _, nome_of in achados.values()])
+    await _salvar_no_banco([(cnpj, nome_of, "cnpja") for cnpj, _, nome_of, _ in achados.values()])
+    # Registra o alias do NOME DE ENTRADA usado na busca: a re-análise casa de graça
+    # mesmo quando o nome oficial (salvo no Fornecedor) difere da grafia do arquivo.
+    await _registrar_aliases([(nome_entrada, cnpj) for cnpj, _, _, nome_entrada in achados.values()])
 
     # Audit trail do consumo: cada busca efetivamente feita ao CNPJá consome créditos.
     try:
@@ -360,8 +387,12 @@ async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
     if not cnpj_lookup.validar_cnpj(cnpj):
         raise HTTPException(status_code=422, detail="CNPJ inválido (dígito verificador não confere).")
 
-    if not any(f["cod_forn"] == body.cod_forn for f in job["fornecedores"]):
+    alvo = next((f for f in job["fornecedores"] if f["cod_forn"] == body.cod_forn), None)
+    if alvo is None:
         raise HTTPException(status_code=404, detail="Fornecedor não encontrado neste job.")
+    # Captura o nome de ENTRADA do arquivo ANTES de eventual sobrescrita pela razão social:
+    # é essa grafia que precisa virar alias para a re-análise casar sem API.
+    nome_entrada_original = alvo["nome_forn"]
 
     def _aplicar(j: dict) -> None:
         for f in j["fornecedores"]:
@@ -382,6 +413,10 @@ async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
     final = next(f for f in atual["fornecedores"] if f["cod_forn"] == body.cod_forn)
     # Salva no banco para reuso futuro (correção manual vira conhecimento permanente).
     await _salvar_no_banco([(cnpj, final["nome_forn"], "manual")])
+    # Registra alias da grafia de entrada original -> cnpj (e, se o usuário renomeou,
+    # também a nova grafia), para a re-análise casar de graça por qualquer uma delas.
+    aliases = {nome_entrada_original, final["nome_forn"]}
+    await _registrar_aliases([(nome, cnpj) for nome in aliases if nome])
     return final
 
 

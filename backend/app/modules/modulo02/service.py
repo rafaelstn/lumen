@@ -3,11 +3,16 @@
 Cada avaliação consome consultas pagas (CNPJá para dados/Simples/fundação + Infosimples
 para a CND). O controle de orçamento e o teto por chamada ficam no router.
 """
+import logging
+
 import httpx
 
+from app.database import async_session_factory
 from app.modules.consumo import repo as consumo_repo
-from app.modules.modulo01 import budget, cnd, cnpj_lookup
+from app.modules.modulo01 import budget, cnd, cnpj_lookup, fornecedores_repo
 from app.modules.modulo02 import repo, scorer
+
+logger = logging.getLogger("modulo02")
 
 
 async def avaliar_cnpj(cnpj: str, client: httpx.AsyncClient, throttle=None) -> dict:
@@ -27,6 +32,17 @@ async def avaliar_cnpj(cnpj: str, client: httpx.AsyncClient, throttle=None) -> d
         dados = {}  # falha pontual de dado: segue com score parcial
 
     cnd_res = await cnd.consultar_cnd(cnpj, client)
+
+    # Registra por CNPJ quando/qual foi a última CND (metadado de controle, não fonte de verdade).
+    # Só com status real: FALHA não atualiza a data. Tolerante: banco fora não derruba a avaliação.
+    if cnpj and cnd_res["status"] != cnd.FALHA:
+        try:
+            async with async_session_factory() as session:
+                await fornecedores_repo.registrar_cnd(
+                    session, cnpj, cnd_res["status"], razao_social=dados.get("nome_oficial")
+                )
+        except Exception:
+            logger.warning("M02: falha ao registrar metadado de CND por CNPJ.", exc_info=True)
 
     s = scorer.calcular_score(
         simples_optante=dados.get("simples_optante"),

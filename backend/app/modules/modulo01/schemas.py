@@ -15,6 +15,11 @@ class FornecedorResult(BaseModel):
     tem_estorno: bool = False
     status_cnd: str | None = None
     cnd_descricao: str | None = None
+    # Metadado de controle da última CND consultada deste CNPJ (vem do banco ao casar).
+    # Informativo: o frontend mostra "CND consultada em X, estava Y" antes de repuxar.
+    # NÃO substitui status_cnd (volátil, da consulta da vez) nem dispara reconsulta automática.
+    cnd_ultima_consulta: str | None = None
+    cnd_status_cache: str | None = None
     risco_2027: str | None = None
     motivo_risco: str | None = None
     impacto_financeiro_anual: float | None = None

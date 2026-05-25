@@ -25,6 +25,17 @@ async def lifespan(app: FastAPI):
 
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+            # Micro-migração idempotente: create_all NÃO adiciona colunas a tabelas
+            # que já existem. Tabelas que ganharam colunas depois de já estarem em
+            # produção precisam de ALTER. Só no Postgres (em teste o SQLite é recriado);
+            # IF NOT EXISTS garante idempotência e não quebra em re-deploy.
+            if conn.dialect.name == "postgresql":
+                await conn.exec_driver_sql(
+                    "ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS cnd_ultima_consulta TIMESTAMPTZ NULL"
+                )
+                await conn.exec_driver_sql(
+                    "ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS cnd_ultimo_status VARCHAR(40) NULL"
+                )
 
         async with async_session_factory() as session:
             if await session.get(Escritorio, settings.escritorio_default_id) is None:

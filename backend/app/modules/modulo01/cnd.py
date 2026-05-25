@@ -15,7 +15,8 @@ from datetime import datetime, timezone
 import httpx
 
 from app.config import settings
-from app.modules.modulo01 import budget
+from app.database import async_session_factory
+from app.modules.modulo01 import budget, fornecedores_repo
 from app.modules.modulo01.jobs import store
 
 logger = logging.getLogger("modulo01.cnd")
@@ -141,11 +142,15 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
                 else:
                     r = await consultar_cnd(cnpj, client)
 
+            # Capturado dentro do lock para persistir o metadado de CND fora dele depois.
+            cap: dict = {}
+
             def aplicar(job: dict) -> None:
                 for f in job["fornecedores"]:
                     if f["cod_forn"] == cod_forn:
                         f["status_cnd"] = r["status"]
                         f["cnd_descricao"] = r.get("descricao")
+                        cap["razao_social"] = f.get("nome_forn")
                         break
                 prog = job.get("cnd_progresso") or {"total": total, "consultados": 0, "falhas": 0}
                 prog["consultados"] = prog.get("consultados", 0) + 1
@@ -158,6 +163,19 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
 
             if not store.mutar(job_id, aplicar):
                 logger.warning("CND: job %s expirou durante a consulta; resultado descartado.", job_id)
+                return
+
+            # Registra por CNPJ quando/qual foi a última CND consultada (metadado de controle).
+            # Só com status real: FALHA não atualiza a data para não mascarar o que é recente.
+            # Tolerante: o banco fora do ar não derruba a consulta (o resultado já está no store).
+            if cnpj and r["status"] != FALHA:
+                try:
+                    async with async_session_factory() as session:
+                        await fornecedores_repo.registrar_cnd(
+                            session, cnpj, r["status"], razao_social=cap.get("razao_social")
+                        )
+                except Exception:
+                    logger.warning("CND: falha ao registrar metadado por CNPJ (job %s).", job_id[:8], exc_info=True)
 
         await asyncio.gather(*[um(cod, cnpj) for cod, cnpj in alvos])
 

@@ -138,8 +138,20 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
   );
 }
 
+// Data curta pt-BR (DD/MM/AA); tolera valor ausente/ inválido.
+function dataCurta(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
+}
+
 function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando, onAbrir, onSalvar, onCancelar }) {
   const cnd = statusCndMeta(f.status_cnd);
+  // Status de CND consultado em análise anterior (registrado por CNPJ no banco).
+  // Informativo: a CND é volátil e pode ser reconsultada; isto só mostra o que é recente.
+  const cndCache = !cnd ? statusCndMeta(f.cnd_status_cache) : null;
   const risco = riscoMeta(f.risco_2027);
   const riscoAlto = f.risco_2027 === "ALTO";
 
@@ -218,9 +230,24 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
       {/* CND */}
       <td className="px-4 py-3 align-top">
         {cnd ? (
-          <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 ${cnd.classe}`}>
-            {cnd.rotulo}
-          </span>
+          <div className="flex flex-col gap-0.5">
+            <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 ${cnd.classe}`}>
+              {cnd.rotulo}
+            </span>
+            {f.cnd_ultima_consulta && (
+              <span className="text-[0.65rem] text-slate-400">em {dataCurta(f.cnd_ultima_consulta)}</span>
+            )}
+          </div>
+        ) : cndCache ? (
+          <div
+            className="flex flex-col gap-0.5"
+            title={`Última CND consultada em ${dataCurta(f.cnd_ultima_consulta)}. A CND é volátil; consulte de novo para o status atual.`}
+          >
+            <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 opacity-70 ${cndCache.classe}`}>
+              {cndCache.rotulo}
+            </span>
+            <span className="text-[0.65rem] text-slate-400">consultada em {dataCurta(f.cnd_ultima_consulta)}</span>
+          </div>
         ) : (
           <span className="text-xs text-slate-300">—</span>
         )}
