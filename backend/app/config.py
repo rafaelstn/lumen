@@ -55,9 +55,12 @@ class Settings(BaseSettings):
     scheduler_hora: int = 3  # hora do dia (0-23) para o monitoramento diário
 
     # Feature flags de módulo (roadmap). M02/M03 só ligam após o gate comercial do M01.
+    # M03 (Recuperação de Créditos) CONGELADO em 2026-05-25: as teses exigem
+    # SPED Contribuições/Fiscal (receita/saída) e hoje só temos o Livro de Entradas.
+    # Spec preservada no vault: 01-Projects/Lumen-Fiscal/M03-Spec-Recuperacao-Creditos-CONGELADO.md
     modulo01_enabled: bool = True
     modulo02_enabled: bool = True
-    modulo03_enabled: bool = True
+    modulo03_enabled: bool = False
 
     # Auth (JWT próprio) — preparado, NÃO ativo no MVP. O login real entra depois;
     # por ora todo dado pertence ao escritório default (single-tenant na prática).
