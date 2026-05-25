@@ -194,7 +194,7 @@ export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
             Documento confidencial
           </span>
           <p className="mt-2.5 text-[0.7rem] leading-relaxed text-ink-600/80">
-            Módulo 01 — Crédito de ICMS &amp; Regularidade Fiscal
+            Crédito de ICMS &amp; Regularidade Fiscal
           </p>
         </div>
       </aside>

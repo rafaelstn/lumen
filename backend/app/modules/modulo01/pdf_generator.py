@@ -4,6 +4,7 @@ Imports de Jinja2/WeasyPrint são lazy (dentro das funções) para que o módulo
 ser importado em ambientes sem WeasyPrint (ex.: rodar a suíte no host Windows).
 """
 import os
+import re
 from datetime import datetime
 
 # pdf_generator.py está em app/modules/modulo01/ — sobe dois níveis até app/ e entra em templates/.
@@ -25,6 +26,14 @@ def _pct(valor) -> str:
     except (TypeError, ValueError):
         v = 0.0
     return f"{v:.2f}".replace(".", ",") + "%"
+
+
+def _cnpj(valor) -> str:
+    """Formata CNPJ (14 dígitos) como 00.000.000/0000-00; sem 14 dígitos, devolve '—'."""
+    so = re.sub(r"\D", "", str(valor or ""))
+    if len(so) != 14:
+        return str(valor) if valor else "—"
+    return f"{so[:2]}.{so[2:5]}.{so[5:8]}/{so[8:12]}-{so[12:]}"
 
 
 def _contexto(job: dict) -> dict:
@@ -66,6 +75,7 @@ def _env():
     )
     env.filters["moeda"] = _moeda
     env.filters["pct"] = _pct
+    env.filters["cnpj"] = _cnpj
     return env
 
 

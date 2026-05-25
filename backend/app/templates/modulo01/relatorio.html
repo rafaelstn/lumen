@@ -43,9 +43,9 @@
 
   <section class="capa">
     <h1>Análise Fiscal de Fornecedores</h1>
-    <p class="meta">Módulo 01 — Crédito de ICMS e Regularidade Fiscal</p>
+    <p class="meta">Crédito de ICMS e Regularidade Fiscal</p>
     <div class="cliente">{{ metadados.cliente or "Cliente não identificado" }}</div>
-    {% if metadados.cnpj_cliente %}<div class="meta">CNPJ: {{ metadados.cnpj_cliente }}</div>{% endif %}
+    {% if metadados.cnpj_cliente %}<div class="meta">CNPJ: {{ metadados.cnpj_cliente | cnpj }}</div>{% endif %}
     {% if metadados.periodo %}<div class="meta">Período: {{ metadados.periodo }}</div>{% endif %}
     <div class="meta">Emissão: {{ emitido_em }}</div>
     <div class="conf">CONFIDENCIAL</div>
@@ -72,7 +72,7 @@
       {% for f in alertas_risco %}
       <tr class="alerta">
         <td>{{ f.nome_forn }}</td>
-        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.cnpj | cnpj }}</td>
         <td>{{ f.status_cnd }}</td>
         <td class="num">{{ f.impacto_financeiro_anual | moeda }}</td>
       </tr>
@@ -88,7 +88,7 @@
     <tbody>
       {% for f in grupo_a %}
       <tr{% if f.risco_2027 == "ALTO" %} class="alerta"{% endif %}>
-        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.cnpj | cnpj }}</td>
         <td>{{ f.nome_forn }}{% if f.verificar_st %} <span class="pendente">(verificar ST)</span>{% endif %}</td>
         <td class="num">{{ f.total_compras | moeda }}</td>
         <td class="num">{{ f.aliquota_max | pct }}</td>
@@ -107,7 +107,7 @@
     <tbody>
       {% for f in grupo_b %}
       <tr>
-        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.cnpj | cnpj }}</td>
         <td>{{ f.nome_forn }}</td>
         <td class="num">{{ f.total_compras | moeda }}</td>
         <td class="num">{{ f.aliquota_efetiva_pct | pct }}</td>
@@ -125,7 +125,7 @@
     <tbody>
       {% for f in grupo_c %}
       <tr>
-        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.cnpj | cnpj }}</td>
         <td>{{ f.nome_forn }}</td>
         <td class="num">{{ f.total_compras | moeda }}</td>
         <td class="num">{{ f.credito_perdido | moeda }}</td>
@@ -144,7 +144,7 @@
       {% for f in verificacao_manual %}
       <tr>
         <td>{{ f.nome_forn }}</td>
-        <td>{{ f.cnpj or "—" }}</td>
+        <td>{{ f.cnpj | cnpj }}</td>
         <td>
           {% if f.verificar_st %}Alíquota ≥ 12% com ICMS zerado (possível Substituição Tributária). {% endif %}
           {% if f.cnpj_pendente %}CNPJ não localizado. {% endif %}

@@ -141,6 +141,22 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
   );
 }
 
+// Tooltip no hover/foco (acessível). Mostra o texto ao passar o mouse ou focar,
+// sem depender do title nativo do navegador (que é lento e nem sempre aparece).
+function Tooltip({ children, texto }) {
+  return (
+    <span className="group/tip relative inline-flex" tabIndex={0}>
+      {children}
+      <span
+        role="tooltip"
+        className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden w-64 rounded-lg bg-ink-900 px-3 py-2 text-left text-[0.7rem] font-400 leading-snug text-white shadow-lift group-hover/tip:block group-focus/tip:block"
+      >
+        {texto}
+      </span>
+    </span>
+  );
+}
+
 // Data curta pt-BR (DD/MM/AA); tolera valor ausente/ inválido.
 function dataCurta(iso) {
   if (!iso) return "";
@@ -196,12 +212,11 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
           <span className="font-500 text-ink-800">{f.nome_forn}</span>
           <div className="flex flex-wrap items-center gap-1.5">
             {f.verificar_st && (
-              <span
-                className="inline-flex cursor-help items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-amber-700"
-                title="Alíquota cheia cadastrada, mas o ICMS veio zerado nas notas deste fornecedor. Provável Substituição Tributária (o ICMS já foi recolhido antes na cadeia, então não gera crédito), ou erro de lançamento. Confira a nota de entrada: CFOP de ST (ex. 1403, 1411) e o campo ICMS ST. Se for ST, essas compras não dão crédito."
-              >
-                <AlertTriangle className="h-3 w-3" /> Verificar ST
-              </span>
+              <Tooltip texto="Alíquota cheia cadastrada, mas o ICMS veio zerado nas notas deste fornecedor. Provável Substituição Tributária (o ICMS já foi recolhido antes na cadeia, então não gera crédito), ou erro de lançamento. Confira a nota de entrada: CFOP de ST (ex. 1403, 1411) e o campo ICMS ST. Se for ST, essas compras não dão crédito.">
+                <span className="inline-flex cursor-help items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-amber-700">
+                  <AlertTriangle className="h-3 w-3" /> Verificar ST
+                </span>
+              </Tooltip>
             )}
             {f.tem_estorno && (
               <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-slate-600">
