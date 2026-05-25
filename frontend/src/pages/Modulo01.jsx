@@ -155,6 +155,13 @@ export default function Modulo01() {
       setProgresso((p) => p ?? { status: "em_andamento", percentual: 0, total: null, consultados: 0, falhas: 0 });
     },
     onError: (e) => {
+      // 409 = já existe uma CND em andamento no servidor. Não é erro: ativa a barra
+      // e o polling em vez de mostrar mensagem vermelha.
+      if (e?.response?.status === 409) {
+        setErroCnd(null);
+        setProgresso((p) => p ?? { status: "em_andamento", percentual: 0, total: null, consultados: 0, falhas: 0 });
+        return;
+      }
       setErroCnd(e?.response?.data?.detail ?? "Não foi possível iniciar a consulta de CND.");
       pararPolling();
     },
@@ -241,6 +248,37 @@ export default function Modulo01() {
 
   useEffect(() => pararPolling, []);
   useEffect(() => pararPollingEnriquecimento, []);
+
+  // Ao carregar/reabrir uma análise, re-hidrata o progresso de CND e de enriquecimento
+  // a partir do servidor. Sem isso, a barra some ao reabrir uma análise cuja consulta
+  // ainda está rodando (o estado local começa zerado).
+  useEffect(() => {
+    const jobId = resultado?.job_id;
+    if (!jobId) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const pc = await consultarProgresso(jobId);
+        if (!cancelado && (pc?.status === "em_andamento" || pc?.status === "concluido")) {
+          setProgresso(pc);
+        }
+      } catch {
+        /* sem progresso de CND para este job */
+      }
+      try {
+        const pe = await consultarProgressoEnriquecimento(jobId);
+        if (!cancelado && (pe?.status === "em_andamento" || pe?.status === "concluido")) {
+          setProgressoEnriquecimento(pe);
+        }
+      } catch {
+        /* sem progresso de enriquecimento para este job */
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resultado?.job_id]);
 
   const detalheErro =
     processar.error?.response?.data?.detail ??
