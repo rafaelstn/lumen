@@ -13,6 +13,8 @@ import {
   AlertCircle,
   ScanLine,
   Sparkles,
+  EyeOff,
+  History,
 } from "lucide-react";
 import {
   processarArquivos,
@@ -22,8 +24,10 @@ import {
   consultarProgresso,
   consultarProgressoEnriquecimento,
   consultarResultado,
+  abrirAnalise,
   urlRelatorio,
 } from "../services/api.js";
+import HistoricoAnalises from "../components/HistoricoAnalises.jsx";
 import { moeda, moedaCompacta, numero } from "../utils/format.js";
 import { useCustosEfetivos, SERVICO } from "../utils/custos.js";
 import FileUpload from "../components/FileUpload.jsx";
@@ -39,12 +43,26 @@ import ConfirmacaoCusto from "../components/ConfirmacaoCusto.jsx";
 // Recharts é pesado; carregado sob demanda só quando o dashboard aparece.
 const DistribuicaoGrupos = lazy(() => import("../components/DistribuicaoGrupos.jsx"));
 
+// Preferência local (não-auth) para ocultar a seção de histórico. Vira controle
+// por papel quando o login entrar. Lida de forma tolerante a localStorage indisponível.
+const CHAVE_HISTORICO_OCULTO = "lumen:historico-oculto";
+function lerHistoricoOculto() {
+  try {
+    return localStorage.getItem(CHAVE_HISTORICO_OCULTO) === "1";
+  } catch {
+    return false;
+  }
+}
+
 // Orquestra o fluxo do Módulo 01:
 // upload → classificação → (CNPJ manual) → consulta CND assíncrona com polling → dashboard final → PDF.
 export default function Modulo01() {
   const [entradas, setEntradas] = useState(null);
   const [resultado, setResultado] = useState(null);
   const [erroCnpj, setErroCnpj] = useState(null);
+
+  // Preferência local: seção de histórico oculta. Persistida em localStorage.
+  const [historicoOculto, setHistoricoOculto] = useState(lerHistoricoOculto);
 
   // Estado da consulta CND: progresso vindo do polling + erro de disparo.
   const [progresso, setProgresso] = useState(null); // {total, consultados, falhas, percentual, status}
@@ -67,6 +85,25 @@ export default function Modulo01() {
     mutationFn: processarArquivos,
     onSuccess: (data) => setResultado(data),
   });
+
+  // Reabrir análise salva: o backend re-hidrata o job e devolve o MESMO shape
+  // de /resultado/{job_id}. Tratamos exatamente como o processar.onSuccess —
+  // setResultado leva direto ao dashboard com o job_id ativo, então enriquecimento,
+  // CND e PDF seguem funcionando sobre a análise reaberta.
+  const abrir = useMutation({
+    mutationFn: abrirAnalise,
+    onSuccess: (data) => setResultado(data),
+  });
+
+  function alternarHistorico(oculto) {
+    setHistoricoOculto(oculto);
+    try {
+      if (oculto) localStorage.setItem(CHAVE_HISTORICO_OCULTO, "1");
+      else localStorage.removeItem(CHAVE_HISTORICO_OCULTO);
+    } catch {
+      /* preferência some se o storage estiver indisponível; sem impacto no fluxo */
+    }
+  }
 
   const salvarCnpj = useMutation({
     mutationFn: ({ codForn, cnpj, razaoSocial }) =>
@@ -290,6 +327,40 @@ export default function Modulo01() {
             )}
           </div>
         </div>
+
+        {abrir.isError && (
+          <Alerta tom="erro" className="mt-4">
+            {abrir.error?.response?.data?.detail ?? "Não foi possível reabrir a análise."}
+          </Alerta>
+        )}
+
+        {/* Histórico de acesso rápido: reabrir análises sem subir a planilha de novo.
+            Ocultável por preferência local (vira controle por papel com o login). */}
+        {historicoOculto ? (
+          <div className="mt-6 text-center">
+            <button
+              type="button"
+              onClick={() => alternarHistorico(false)}
+              className="inline-flex items-center gap-1.5 text-xs font-500 text-slate-400 transition-colors hover:text-ink-700"
+            >
+              <History className="h-3.5 w-3.5" /> Mostrar histórico
+            </button>
+          </div>
+        ) : (
+          <div className="mt-2">
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => alternarHistorico(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-500 text-slate-400 transition-colors hover:text-ink-700"
+                aria-label="Ocultar histórico de análises"
+              >
+                <EyeOff className="h-3.5 w-3.5" /> Ocultar
+              </button>
+            </div>
+            <HistoricoAnalises onAbrir={(id) => abrir.mutate(id)} abrindoId={abrir.isPending ? abrir.variables : null} />
+          </div>
+        )}
       </div>
     );
   }

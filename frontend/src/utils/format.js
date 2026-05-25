@@ -37,6 +37,23 @@ export function numero(valor) {
   return (Number(valor) || 0).toLocaleString("pt-BR");
 }
 
+// Data/hora pt-BR (ex.: "22/05/2026, 14:30"). Aceita ISO string ou Date.
+// Devolve "—" para valor ausente/inválido em vez de "Invalid Date".
+const dataHoraBr = new Intl.DateTimeFormat("pt-BR", {
+  day: "2-digit",
+  month: "2-digit",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
+
+export function dataHora(valor) {
+  if (!valor) return "—";
+  const d = valor instanceof Date ? valor : new Date(valor);
+  if (Number.isNaN(d.getTime())) return "—";
+  return dataHoraBr.format(d);
+}
+
 // Variante "suave" para fundos de tabela e chips claros.
 export const CORES_GRUPO = {
   A: "bg-jade-50 text-jade-700 border-jade-200",

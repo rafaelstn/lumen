@@ -85,6 +85,30 @@ export async function consultarResultado(jobId) {
   return data;
 }
 
+// ---- HISTÓRICO DE ANÁLISES — reabrir sem re-subir ----------------------
+// Análises já processadas, mais recente primeiro. Não consome créditos.
+// { analises: [{ id, cliente, cnpj_cliente, periodo, total_fornecedores,
+//   criado_em, atualizado_em }] }.
+export async function listarAnalises() {
+  const { data } = await api.get("/modulo01/analises");
+  return data.analises;
+}
+
+// Reabre uma análise salva: re-hidrata o job no servidor e devolve o MESMO
+// shape de /resultado/{job_id} ({ job_id, status, metadados, resumo,
+// fornecedores }). O job_id retornado serve para continuar enriquecimento,
+// CND e PDF normalmente.
+export async function abrirAnalise(id) {
+  const { data } = await api.get(`/modulo01/analise/${id}`);
+  return data;
+}
+
+// Remove uma análise do histórico. { id, status: "removida" }.
+export async function apagarAnalise(id) {
+  const { data } = await api.delete(`/modulo01/analise/${id}`);
+  return data;
+}
+
 // ---- MÓDULO 02 — Score Fiscal de Fornecedores --------------------------
 // Consultas que tocam due-diligence/monitorar/reavaliar consomem créditos da
 // API paga (InfoSimples). O servidor pode retornar 400 com detalhe
