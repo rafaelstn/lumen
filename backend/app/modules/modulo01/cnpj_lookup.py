@@ -179,6 +179,95 @@ def melhor_match(nome_alvo: str, records: list[dict]) -> dict:
     return {"cnpj": None, "nome_oficial": None, "confianca": CONF_AMBIGUO, "n_candidatos": len(matrizes)}
 
 
+def _so_digitos(valor: str | None) -> str:
+    return re.sub(r"\D", "", valor or "")
+
+
+def _capital_para_centavos(equity) -> int | None:
+    """Converte o capital social (reais, vindo como número/None) para centavos (inteiro).
+
+    Dinheiro nunca em float no banco (regra financeiro.md): guardamos centavos inteiros.
+    Usa Decimal com ROUND_HALF_UP para não perder/arredondar errado o centavo. Tolerante:
+    valor ausente ou ilegível vira None (não derruba a gravação do cadastro).
+    """
+    if equity is None:
+        return None
+    try:
+        from decimal import ROUND_HALF_UP, Decimal
+
+        reais = Decimal(str(equity))
+        return int((reais * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except (ArithmeticError, ValueError, TypeError):
+        return None
+
+
+def extrair_cadastro(record: dict) -> dict:
+    """Normaliza um record do CNPJá /office (busca por nome OU detalhe) em um dict de cadastro.
+
+    Função PURA e tolerante: campos ausentes viram None/listas vazias. O /office retorna o
+    MESMO objeto completo tanto na busca por nome (?company.name.in) quanto no detalhe
+    (/office/{cnpj}) — daí gravamos o cadastro completo SEM consulta extra. Não loga nada
+    (o chamador é quem decide o que logar; sócios nunca devem ir para log).
+
+    Mapeamento do schema CNPJá:
+    address{street,number,details,district,city,state,zip}; phones[{area,number}];
+    emails[{address}]; mainActivity{id,text}; sideActivities[]; company{name,equity,
+    nature{text}, size{text}, members[{person{name}, role{text}, since}]}; status{text};
+    registrationStatus{text} (fallback); founded.
+    """
+    company = record.get("company") or {}
+    address = record.get("address") or {}
+    main = record.get("mainActivity") or {}
+    status = record.get("status") or record.get("registrationStatus") or {}
+
+    def _telefone(p: dict) -> str:
+        return f"{_so_digitos(p.get('area'))}{_so_digitos(p.get('number'))}".strip()
+
+    telefones = [t for t in (_telefone(p) for p in (record.get("phones") or [])) if t]
+    emails = [e for e in ((em.get("address") or "").strip() for em in (record.get("emails") or [])) if e]
+
+    side = [
+        {"codigo": str(a.get("id") or ""), "descricao": (a.get("text") or "").strip()}
+        for a in (record.get("sideActivities") or [])
+        if a.get("id") or a.get("text")
+    ]
+
+    socios = [
+        {
+            "nome": (m.get("person") or {}).get("name", "").strip(),
+            "qualificacao": (m.get("role") or {}).get("text"),
+            "desde": m.get("since"),
+        }
+        for m in (company.get("members") or [])
+        if (m.get("person") or {}).get("name")
+    ]
+
+    return {
+        "cnpj": _so_digitos(record.get("taxId")),
+        "razao_social": (company.get("name") or "").strip() or None,
+        "nome_fantasia": (record.get("alias") or "").strip() or None,
+        "logradouro": (address.get("street") or "").strip() or None,
+        "numero": (str(address.get("number")) if address.get("number") not in (None, "") else None),
+        "complemento": (address.get("details") or "").strip() or None,
+        "bairro": (address.get("district") or "").strip() or None,
+        "municipio": (address.get("city") or "").strip() or None,
+        "uf": (address.get("state") or "").strip().upper() or None,
+        "cep": _so_digitos(address.get("zip")) or None,
+        "telefone_principal": telefones[0] if telefones else None,
+        "email_principal": emails[0] if emails else None,
+        "contatos": {"telefones": telefones, "emails": emails} if (telefones or emails) else None,
+        "cnae_principal_codigo": str(main.get("id")) if main.get("id") else None,
+        "cnae_principal_descricao": (main.get("text") or "").strip() or None,
+        "cnaes_secundarios": side or None,
+        "porte": ((company.get("size") or {}).get("text") or "").strip() or None,
+        "natureza_juridica": ((company.get("nature") or {}).get("text") or "").strip() or None,
+        "situacao_cadastral": (status.get("text") or "").strip() or None,
+        "data_abertura": record.get("founded") or None,
+        "capital_social_centavos": _capital_para_centavos(company.get("equity")),
+        "socios": socios,
+    }
+
+
 def _headers() -> dict:
     if not settings.cnpj_lookup_api_key:
         raise LookupError("Serviço de busca de CNPJ não disponível no momento.")
@@ -241,6 +330,14 @@ async def buscar_por_nome(
 
     records = resp.json().get("records", [])
     resultado = melhor_match(nome, records)
+    # O /office por nome JÁ devolve o cadastro completo de cada record (sem crédito extra).
+    # Quando casou um CNPJ, anexamos o cadastro do record escolhido para gravar de graça.
+    if resultado.get("cnpj"):
+        alvo_dig = _so_digitos(resultado["cnpj"])
+        escolhido = next((r for r in records if _so_digitos(r.get("taxId")) == alvo_dig), None)
+        resultado["cadastro"] = extrair_cadastro(escolhido) if escolhido else None
+    else:
+        resultado["cadastro"] = None
     logger.info(
         "cnpj_lookup nome=%r uf=%s -> confianca=%s candidatos=%s",
         nome, uf, resultado["confianca"], resultado["n_candidatos"],
@@ -277,4 +374,6 @@ async def consultar_cnpj(
         "situacao_cadastral": status.get("text"),
         "simples_optante": simples.get("optant"),
         "fundacao": d.get("founded"),  # usado pelo score (maturidade do CNPJ)
+        # Cadastro completo do mesmo retorno (sem crédito extra), para gravar no banco.
+        "cadastro": extrair_cadastro(d),
     }

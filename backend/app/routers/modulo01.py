@@ -376,7 +376,11 @@ async def cnpj_manual(request: Request, job_id: str, body: CnpjManualIn):
 @router.get("/fornecedores/buscar")
 @limiter.limit("60/minute")
 async def buscar_fornecedores(request: Request, q: str = ""):
-    """Busca gratuita no banco de fornecedores (cache local) por razão social."""
+    """Busca gratuita no banco de fornecedores (cache local) por razão social.
+
+    Listagem ampla: devolve só identidade (cnpj/razão/origem). NUNCA inclui sócios
+    (dado pessoal de terceiros, LGPD) — esses só no detalhe sob demanda.
+    """
     try:
         async with async_session_factory() as session:
             forns = await fornecedores_repo.buscar(session, q)
@@ -387,3 +391,26 @@ async def buscar_fornecedores(request: Request, q: str = ""):
             {"cnpj": f.cnpj, "razao_social": f.razao_social, "origem": f.origem} for f in forns
         ]
     }
+
+
+@router.get("/fornecedor/{cnpj}")
+@limiter.limit("60/minute")
+async def fornecedor_detalhe(request: Request, cnpj: str):
+    """Cadastro completo de um fornecedor já gravado no banco (endereço, contato, atividade, sócios).
+
+    Detalhe SOB DEMANDA: é o único ponto que devolve o quadro societário (dado pessoal de
+    terceiros, LGPD). Não consome créditos (lê do cache local). 404 se o CNPJ não existir.
+    """
+    # Normaliza preservando letras (CNPJ alfanumérico a partir de 2026), só remove o que
+    # não é alfanumérico. Não valida DV: é leitura no banco, casa pelo que está gravado.
+    chave = re.sub(r"[^0-9A-Za-z]", "", cnpj or "").upper()
+    if not chave:
+        raise HTTPException(status_code=404, detail="Fornecedor não encontrado.")
+    try:
+        async with async_session_factory() as session:
+            cadastro = await fornecedores_repo.obter_cadastro_completo(session, chave)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Consulta de fornecedor temporariamente indisponível.")
+    if cadastro is None:
+        raise HTTPException(status_code=404, detail="Fornecedor não encontrado.")
+    return cadastro

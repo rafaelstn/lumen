@@ -30,12 +30,37 @@ async def lifespan(app: FastAPI):
             # produção precisam de ALTER. Só no Postgres (em teste o SQLite é recriado);
             # IF NOT EXISTS garante idempotência e não quebra em re-deploy.
             if conn.dialect.name == "postgresql":
-                await conn.exec_driver_sql(
-                    "ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS cnd_ultima_consulta TIMESTAMPTZ NULL"
+                # Colunas adicionadas após a tabela já estar em produção. IF NOT EXISTS
+                # garante idempotência em re-deploy. fornecedor_socios é tabela nova:
+                # create_all a cria, não precisa de ALTER.
+                _colunas_fornecedores = (
+                    "cnd_ultima_consulta TIMESTAMPTZ NULL",
+                    "cnd_ultimo_status VARCHAR(40) NULL",
+                    "nome_fantasia VARCHAR(255) NULL",
+                    "logradouro VARCHAR(255) NULL",
+                    "numero VARCHAR(20) NULL",
+                    "complemento VARCHAR(255) NULL",
+                    "bairro VARCHAR(255) NULL",
+                    "municipio VARCHAR(255) NULL",
+                    "uf VARCHAR(2) NULL",
+                    "cep VARCHAR(8) NULL",
+                    "telefone_principal VARCHAR(20) NULL",
+                    "email_principal VARCHAR(255) NULL",
+                    "contatos JSON NULL",
+                    "cnae_principal_codigo VARCHAR(10) NULL",
+                    "cnae_principal_descricao VARCHAR(255) NULL",
+                    "cnaes_secundarios JSON NULL",
+                    "porte VARCHAR(40) NULL",
+                    "natureza_juridica VARCHAR(255) NULL",
+                    "situacao_cadastral VARCHAR(40) NULL",
+                    "data_abertura VARCHAR(10) NULL",
+                    "capital_social_centavos NUMERIC(18,0) NULL",
+                    "cadastro_atualizado_em TIMESTAMPTZ NULL",
                 )
-                await conn.exec_driver_sql(
-                    "ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS cnd_ultimo_status VARCHAR(40) NULL"
-                )
+                for coluna in _colunas_fornecedores:
+                    await conn.exec_driver_sql(
+                        f"ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS {coluna}"
+                    )
 
         async with async_session_factory() as session:
             if await session.get(Escritorio, settings.escritorio_default_id) is None:

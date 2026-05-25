@@ -87,7 +87,14 @@ def _classificar(prog: dict, achados: dict, cod_forn: str, nome: str, r: dict) -
     conf = r["confianca"]
     if conf in (cnpj_lookup.CONF_ALTA, cnpj_lookup.CONF_BAIXA):
         confirmado = conf == cnpj_lookup.CONF_ALTA
-        achados[cod_forn] = (r["cnpj"], confirmado, r.get("nome_oficial") or nome, nome)
+        # Guarda também o cadastro completo (vem no MESMO retorno da busca, sem crédito extra).
+        achados[cod_forn] = {
+            "cnpj": r["cnpj"],
+            "confirmado": confirmado,
+            "nome_oficial": r.get("nome_oficial") or nome,
+            "nome_entrada": nome,
+            "cadastro": r.get("cadastro"),
+        }
         prog["confirmados" if confirmado else "baixa_confianca"] += 1
     elif conf == cnpj_lookup.CONF_AMBIGUO:
         prog["ambiguos"] += 1
@@ -142,12 +149,12 @@ async def _processar(job_id: str, pendentes: list[tuple[str, str]]) -> None:
                 _classificar(prog, achados, _cod, _nome, _r)
                 # Aplica o achado já no fornecedor para o /resultado refletir incrementalmente.
                 if _cod in achados:
-                    cnpj, confirmado, _, _ = achados[_cod]
+                    a = achados[_cod]
                     for f in job["fornecedores"]:
                         if f["cod_forn"] == _cod:
-                            f["cnpj"] = cnpj
+                            f["cnpj"] = a["cnpj"]
                             f["cnpj_pendente"] = False
-                            f["cnpj_confirmado"] = confirmado
+                            f["cnpj_confirmado"] = a["confirmado"]
                             break
                 prog["percentual"] = round(prog["processados"] / total * 100, 1) if total else 100.0
 
@@ -178,11 +185,18 @@ async def _persistir(job_id: str, achados: dict, consumidos: int) -> None:
     if achados:
         try:
             async with async_session_factory() as session:
-                for cnpj, _, nome_of, nome_entrada in achados.values():
-                    await fornecedores_repo.upsert(session, cnpj, nome_of, "cnpja")
+                for a in achados.values():
+                    cadastro = a.get("cadastro")
+                    if cadastro and cadastro.get("cnpj"):
+                        # Grava o cadastro COMPLETO (endereço/contato/atividade/sócios) que veio
+                        # no mesmo retorno da busca por nome, sem custo extra de crédito.
+                        await fornecedores_repo.salvar_cadastro(session, cadastro, "cnpja")
+                    else:
+                        # Fallback (cadastro indisponível no retorno): mantém o cache mínimo.
+                        await fornecedores_repo.upsert(session, a["cnpj"], a["nome_oficial"], "cnpja")
                     # Alias do NOME DE ENTRADA do arquivo: a re-análise casa de graça mesmo
                     # quando o nome oficial salvo difere da grafia do arquivo.
-                    await fornecedores_repo.registrar_alias(session, nome_entrada, cnpj)
+                    await fornecedores_repo.registrar_alias(session, a["nome_entrada"], a["cnpj"])
         except Exception:
             logger.warning(
                 "Enriquecimento: falha ao salvar CNPJ/alias no banco (job %s).", job_id[:8], exc_info=True

@@ -33,16 +33,22 @@ async def avaliar_cnpj(cnpj: str, client: httpx.AsyncClient, throttle=None) -> d
 
     cnd_res = await cnd.consultar_cnd(cnpj, client)
 
-    # Registra por CNPJ quando/qual foi a última CND (metadado de controle, não fonte de verdade).
-    # Só com status real: FALHA não atualiza a data. Tolerante: banco fora não derruba a avaliação.
-    if cnpj and cnd_res["status"] != cnd.FALHA:
+    # Grava o cadastro completo do CNPJ (veio no mesmo retorno da consulta, sem crédito extra)
+    # e registra o metadado de CND. Tudo tolerante: banco fora não derruba a avaliação.
+    if cnpj:
         try:
             async with async_session_factory() as session:
-                await fornecedores_repo.registrar_cnd(
-                    session, cnpj, cnd_res["status"], razao_social=dados.get("nome_oficial")
-                )
+                cadastro = dados.get("cadastro")
+                if cadastro and cadastro.get("cnpj"):
+                    await fornecedores_repo.salvar_cadastro(session, cadastro, "cnpja")
+                # Metadado de controle da última CND (não fonte de verdade). Só com status real:
+                # FALHA não atualiza a data, para não mascarar o que é recente.
+                if cnd_res["status"] != cnd.FALHA:
+                    await fornecedores_repo.registrar_cnd(
+                        session, cnpj, cnd_res["status"], razao_social=dados.get("nome_oficial")
+                    )
         except Exception:
-            logger.warning("M02: falha ao registrar metadado de CND por CNPJ.", exc_info=True)
+            logger.warning("M02: falha ao gravar cadastro/metadado de CND por CNPJ.", exc_info=True)
 
     s = scorer.calcular_score(
         simples_optante=dados.get("simples_optante"),

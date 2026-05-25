@@ -5,11 +5,20 @@ sem reconsultar API paga. Toda operação é tolerante (o chamador trata indispo
 """
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.fornecedor import Fornecedor, FornecedorAlias
+from app.models.fornecedor import Fornecedor, FornecedorAlias, FornecedorSocio
 from app.modules.modulo01.cnpj_lookup import _normalizar
+
+# Campos escalares do cadastro completo que o salvar_cadastro persiste no Fornecedor.
+# (sócios vão em tabela separada; razao_social/origem/nome_normalizado têm tratamento próprio.)
+_CAMPOS_CADASTRO = (
+    "nome_fantasia", "logradouro", "numero", "complemento", "bairro", "municipio", "uf", "cep",
+    "telefone_principal", "email_principal", "contatos",
+    "cnae_principal_codigo", "cnae_principal_descricao", "cnaes_secundarios",
+    "porte", "natureza_juridica", "situacao_cadastral", "data_abertura", "capital_social_centavos",
+)
 
 
 async def buscar_exato(session: AsyncSession, nome: str) -> Fornecedor | None:
@@ -145,3 +154,125 @@ async def upsert(session: AsyncSession, cnpj: str, razao_social: str, origem: st
             )
         )
     await session.commit()
+
+
+def _aplicar_escalares(forn: Fornecedor, cadastro: dict) -> None:
+    """Copia os campos escalares do cadastro para o Fornecedor, sem apagar bom dado existente.
+
+    Só sobrescreve quando o cadastro novo traz valor não-vazio (None/"" não apaga o que já
+    estava bom). Mantém o cache resiliente a retornos parciais do provedor.
+    """
+    for campo in _CAMPOS_CADASTRO:
+        novo = cadastro.get(campo)
+        if novo not in (None, "", [], {}):
+            setattr(forn, campo, novo)
+
+
+async def salvar_cadastro(session: AsyncSession, cadastro: dict, origem: str = "cnpja") -> None:
+    """Persiste o cadastro COMPLETO de um CNPJ (fornecedor + sócios), idempotente por CNPJ.
+
+    Re-gravar atualiza (não duplica). O conjunto de sócios do CNPJ é SUBSTITUÍDO inteiro
+    (delete + insert) para refletir o quadro societário atual sem acumular. Tolerante:
+    cadastro sem CNPJ é no-op. Não loga sócios (dado pessoal de terceiros, LGPD).
+
+    Espera o dict de cnpj_lookup.extrair_cadastro: chaves escalares + 'razao_social' +
+    'socios': [{'nome','qualificacao','desde'}, ...].
+    """
+    if not cadastro:
+        return
+    cnpj = (cadastro.get("cnpj") or "").strip()
+    if not cnpj:
+        return
+
+    forn = await _fornecedor_por_cnpj(session, cnpj)
+    razao = (cadastro.get("razao_social") or "").strip()
+    if forn is None:
+        nome = razao or f"CNPJ {cnpj}"
+        forn = Fornecedor(cnpj=cnpj, razao_social=nome, nome_normalizado=_normalizar(nome), origem=origem)
+        session.add(forn)
+    else:
+        if razao:  # não sobrescreve uma razão boa por vazio
+            forn.razao_social = razao
+            forn.nome_normalizado = _normalizar(razao)
+        forn.origem = origem
+
+    _aplicar_escalares(forn, cadastro)
+    forn.cadastro_atualizado_em = datetime.now(timezone.utc)
+
+    # Sócios: substitui o conjunto inteiro do CNPJ (idempotente, sem duplicar).
+    socios = cadastro.get("socios") or []
+    await session.execute(delete(FornecedorSocio).where(FornecedorSocio.cnpj == cnpj))
+    for s in socios:
+        nome_socio = (s.get("nome") or "").strip()
+        if not nome_socio:
+            continue
+        session.add(
+            FornecedorSocio(
+                cnpj=cnpj,
+                nome=nome_socio,
+                qualificacao=(s.get("qualificacao") or None),
+                desde=(s.get("desde") or None),
+            )
+        )
+    await session.commit()
+
+
+async def obter_cadastro_completo(session: AsyncSession, cnpj: str) -> dict | None:
+    """Lê o cadastro completo de um CNPJ (escalares + sócios) para o endpoint de detalhe.
+
+    Retorna None se o CNPJ não existir no banco. Os sócios (dado pessoal de terceiros) só
+    são devolvidos aqui, no detalhe sob demanda — nunca em listagens/buscas amplas.
+    """
+    cnpj = (cnpj or "").strip()
+    if not cnpj:
+        return None
+    forn = await _fornecedor_por_cnpj(session, cnpj)
+    if forn is None:
+        return None
+    res = await session.execute(
+        select(FornecedorSocio).where(FornecedorSocio.cnpj == cnpj).order_by(FornecedorSocio.id)
+    )
+    socios = list(res.scalars())
+    return {
+        "cnpj": forn.cnpj,
+        "razao_social": forn.razao_social,
+        "nome_fantasia": forn.nome_fantasia,
+        "origem": forn.origem,
+        "endereco": {
+            "logradouro": forn.logradouro,
+            "numero": forn.numero,
+            "complemento": forn.complemento,
+            "bairro": forn.bairro,
+            "municipio": forn.municipio,
+            "uf": forn.uf,
+            "cep": forn.cep,
+        },
+        "contato": {
+            "telefone_principal": forn.telefone_principal,
+            "email_principal": forn.email_principal,
+            "telefones": (forn.contatos or {}).get("telefones", []) if forn.contatos else [],
+            "emails": (forn.contatos or {}).get("emails", []) if forn.contatos else [],
+        },
+        "atividade": {
+            "cnae_principal_codigo": forn.cnae_principal_codigo,
+            "cnae_principal_descricao": forn.cnae_principal_descricao,
+            "cnaes_secundarios": forn.cnaes_secundarios or [],
+            "porte": forn.porte,
+            "natureza_juridica": forn.natureza_juridica,
+            "situacao_cadastral": forn.situacao_cadastral,
+            "data_abertura": forn.data_abertura,
+            "capital_social_centavos": (
+                int(forn.capital_social_centavos) if forn.capital_social_centavos is not None else None
+            ),
+        },
+        "cadastro_atualizado_em": (
+            forn.cadastro_atualizado_em.isoformat() if forn.cadastro_atualizado_em else None
+        ),
+        "cnd": {
+            "ultima_consulta": forn.cnd_ultima_consulta.isoformat() if forn.cnd_ultima_consulta else None,
+            "ultimo_status": forn.cnd_ultimo_status,
+        },
+        "socios": [
+            {"nome": s.nome, "qualificacao": s.qualificacao, "desde": s.desde} for s in socios
+        ],
+    }
