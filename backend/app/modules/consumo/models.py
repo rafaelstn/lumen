@@ -1,4 +1,4 @@
-"""Modelos de consumo de APIs pagas (audit trail + saldo por controle interno).
+"""Modelos de consumo de APIs pagas (audit trail imutável).
 
 Regras financeiras (rules/financeiro.md):
 - Valor monetário SEMPRE inteiro em CENTAVOS. NUNCA float.
@@ -8,9 +8,6 @@ Regras financeiras (rules/financeiro.md):
 - preco_unitario_centavos no log é apenas um indicador inteiro de exibição (arredondado do
   preço de referência); NÃO é a fonte do custo e pode não bater com custo/creditos quando o
   preço por crédito tem fração de centavo (ex.: CNPJá 2,499 c/crédito).
-- O preço por crédito é DERIVADO no SaldoConta: valor_total_pago_centavos / creditos_comprados,
-  calculado em Decimal só na fronteira (nunca float). A recarga é comprada por PACOTE
-  (creditos + valor_total_centavos), o que é exato em centavos.
 - Audit trail imutável: ConsultaLog nunca é atualizado/apagado, só inserido.
 - contexto NUNCA carrega dado sensível em claro (CNPJ vai mascarado ou só job_id/descrição).
 
@@ -64,29 +61,3 @@ class ConsultaLog(Base):
     consumo_estimado: Mapped[bool] = mapped_column(Boolean, default=True)
     # Contexto curto, SEM dado sensível em claro: job_id, descrição, CNPJ mascarado.
     contexto: Mapped[str | None] = mapped_column(String(120), default=None)
-
-
-class SaldoConta(Base):
-    """Controle interno de créditos comprados por serviço (recargas acumuladas, por pacote).
-
-    O usuário informa o PACOTE comprado (creditos + valor_total_centavos); o sistema acumula
-    ambos e desconta o consumo REAL agregado do ConsultaLog. NÃO consulta saldo ao vivo do
-    provider (decisão do produto).
-
-    - creditos_comprados: soma dos créditos de todas as recargas.
-    - valor_total_pago_centavos: soma do valor pago em todas as recargas (exato em centavos).
-    - preço por crédito é DERIVADO (valor_total_pago_centavos / creditos_comprados) em Decimal.
-    Restante = creditos_comprados - soma(creditos_consumidos do serviço no log).
-    """
-
-    __tablename__ = "saldo_contas"
-
-    # PK pelo par (escritorio, serviço): cada tenant controla seu próprio saldo por serviço.
-    escritorio_id: Mapped[str] = mapped_column(String(36), primary_key=True)
-    servico: Mapped[str] = mapped_column(String(10), primary_key=True)  # cnpj | cnd
-    creditos_comprados: Mapped[int] = mapped_column(Integer, default=0)  # acumulado de recargas
-    # Acumulado do valor pago (centavos). Preço por crédito é derivado deste / creditos_comprados.
-    valor_total_pago_centavos: Mapped[int] = mapped_column(Integer, default=0)
-    atualizado_em: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
-    )

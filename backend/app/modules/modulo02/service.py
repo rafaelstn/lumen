@@ -82,11 +82,16 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
     throttle = cnpj_lookup.novo_throttle()
     async with httpx.AsyncClient() as client:
         for f in monitorados:
-            if budget.restante("cnd") <= 0 or budget.restante("cnpj") <= 0:
+            # Reserva atômica do teto (não check-then-consume): só consulta a API paga se
+            # houver saldo no momento da reserva. Sob concorrência, restante pode zerar entre
+            # o check e o consumir (TOCTOU). Se faltar saldo, estorna o que já reservei.
+            if not budget.consumir("cnd"):
                 teto_atingido = True
                 break
-            budget.consumir("cnd")
-            budget.consumir("cnpj")
+            if not budget.consumir("cnpj"):
+                budget.devolver("cnd")
+                teto_atingido = True
+                break
             status_anterior = f.status_cnd_atual
             try:
                 avaliacao = await service_avaliar(client, f.cnpj, throttle)

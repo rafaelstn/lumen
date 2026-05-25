@@ -226,7 +226,7 @@ def test_endpoints_de_dados_exigem_token_com_auth_on(factory, auth_on):
     assert client.get("/api/modulo01/fornecedores").status_code == 401
     assert client.get("/api/modulo02/monitorados").status_code == 401
     assert client.get("/api/modulo02/alertas").status_code == 401
-    assert client.get("/api/consultas/saldo").status_code == 401
+    assert client.get("/api/consultas/historico").status_code == 401
 
 
 # --- cnpj-manual: posse do job (IDOR de escrita) ------------------------------------

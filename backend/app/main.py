@@ -62,6 +62,12 @@ async def lifespan(app: FastAPI):
                         f"ALTER TABLE fornecedores ADD COLUMN IF NOT EXISTS {coluna}"
                     )
 
+                # Remoção do cluster de saldo/recarga (UI removida, não volta). A tabela
+                # saldo_contas ficou órfã em produção; o create_all não dropa o que sumiu
+                # do metadata. DROP idempotente (IF EXISTS) só desta tabela, não afeta
+                # consulta_logs (audit trail) nem nenhuma outra. Histórico de consumo intacto.
+                await conn.exec_driver_sql("DROP TABLE IF EXISTS saldo_contas")
+
         async with async_session_factory() as session:
             if await session.get(Escritorio, settings.escritorio_default_id) is None:
                 session.add(Escritorio(id=settings.escritorio_default_id, nome="Escritório padrão"))

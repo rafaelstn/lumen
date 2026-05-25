@@ -34,10 +34,6 @@ def _normalizar_cnpjs(cnpjs: list[str]) -> list[str]:
     return validos
 
 
-def _orcamento_ok() -> bool:
-    return budget.restante("cnd") > 0 and budget.restante("cnpj") > 0
-
-
 async def _associar(escritorio_id: str, cnpjs: list[str]) -> None:
     """Registra a associação escritório <-> CNPJ avaliado (visão isolada). Tolerante a falha."""
     cnpjs = [c for c in {c for c in cnpjs if c}]
@@ -101,11 +97,17 @@ async def due_diligence(
     throttle = cnpj_lookup.novo_throttle()
     async with httpx.AsyncClient() as client:
         for c in cnpjs:
-            if not _orcamento_ok():
+            # Reserva atômica do teto: só chama a API paga se HOUVER saldo no momento da
+            # reserva (consumir devolve False ao estourar). Não basta checar restante>0 antes:
+            # sob concorrência o saldo pode zerar entre o check e o consumir (TOCTOU).
+            if not budget.consumir("cnd"):
                 teto_atingido = True
                 break
-            budget.consumir("cnd")
-            budget.consumir("cnpj")
+            if not budget.consumir("cnpj"):
+                # cnd já reservada nesta iteração; estorna para não inflar o contador.
+                budget.devolver("cnd")
+                teto_atingido = True
+                break
             try:
                 r = await service.avaliar_cnpj(c, client, throttle=throttle)
             except cnpj_lookup.RateLimitError:
@@ -150,11 +152,14 @@ async def monitorar(request: Request, body: MonitorarIn, ctx: Contexto = Depends
     cnpjs = _normalizar_cnpjs([body.cnpj])
     if not cnpjs:
         raise HTTPException(status_code=422, detail="CNPJ inválido.")
-    if not _orcamento_ok():
-        raise HTTPException(status_code=429, detail="Teto diário de consultas atingido.")
 
-    budget.consumir("cnd")
-    budget.consumir("cnpj")
+    # Reserva atômica (não check-then-consume): só segue se houver saldo no momento da
+    # reserva. Sob concorrência, restante>0 pode mentir entre o check e o consumir (TOCTOU).
+    if not budget.consumir("cnd"):
+        raise HTTPException(status_code=429, detail="Teto diário de consultas atingido.")
+    if not budget.consumir("cnpj"):
+        budget.devolver("cnd")  # estorna o que já reservei nesta operação
+        raise HTTPException(status_code=429, detail="Teto diário de consultas atingido.")
     try:
         async with httpx.AsyncClient() as client:
             avaliacao = await service.avaliar_cnpj(cnpjs[0], client)
