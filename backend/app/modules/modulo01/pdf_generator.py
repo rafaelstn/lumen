@@ -36,6 +36,26 @@ def _cnpj(valor) -> str:
     return f"{so[:2]}.{so[2:5]}.{so[5:8]}/{so[8:12]}-{so[12:]}"
 
 
+_CND_LABEL = {
+    "NEGATIVA": "Negativa (regular)",
+    "POSITIVA_EFEITO_NEGATIVA": "Positiva c/ efeito de negativa (regular)",
+    "POSITIVA": "Positiva (com débitos)",
+    "FALHA": "Falha na consulta",
+}
+
+
+def _cnd_label(status) -> str:
+    return _CND_LABEL.get(status, status or "—")
+
+
+def _simnao(valor) -> str:
+    if valor is True:
+        return "Sim"
+    if valor is False:
+        return "Não"
+    return "—"
+
+
 def _contexto(job: dict) -> dict:
     from app.modules.modulo01 import risk
 
@@ -51,6 +71,13 @@ def _contexto(job: dict) -> dict:
     alertas_risco = risk.alertas_ordenados(fornecedores)
     impacto_total = sum(a.get("impacto_financeiro_anual") or 0 for a in alertas_risco)
     cnd_consultada = any(f.get("status_cnd") for f in fornecedores)
+    # Detalhe de CND: só os fornecedores efetivamente consultados (devedores primeiro,
+    # depois falhas, depois regulares), para a seção dedicada de regularidade fiscal.
+    _ordem_cnd = {"POSITIVA": 0, "FALHA": 1, "POSITIVA_EFEITO_NEGATIVA": 2, "NEGATIVA": 3}
+    cnd_detalhes = sorted(
+        [f for f in fornecedores if f.get("status_cnd")],
+        key=lambda f: _ordem_cnd.get(f.get("status_cnd"), 9),
+    )
     return {
         "metadados": job.get("metadados", {}),
         "resumo": job.get("resumo", {}),
@@ -62,6 +89,7 @@ def _contexto(job: dict) -> dict:
         "alertas_risco": alertas_risco,
         "impacto_total": impacto_total,
         "cnd_consultada": cnd_consultada,
+        "cnd_detalhes": cnd_detalhes,
         "emitido_em": datetime.now().strftime("%d/%m/%Y"),
     }
 
@@ -76,6 +104,8 @@ def _env():
     env.filters["moeda"] = _moeda
     env.filters["pct"] = _pct
     env.filters["cnpj"] = _cnpj
+    env.filters["cnd_label"] = _cnd_label
+    env.filters["simnao"] = _simnao
     return env
 
 

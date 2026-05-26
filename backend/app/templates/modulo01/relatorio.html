@@ -81,6 +81,28 @@
   </table>
   {% endif %}
 
+  {% if cnd_detalhes %}
+  <h2>Regularidade Fiscal (CND)</h2>
+  <p class="nota">Certidão de Débitos Relativos a Tributos Federais e à Dívida Ativa da União (Receita Federal e PGFN). "Falha na consulta" não indica débito: é uma consulta que não retornou e pode ser refeita.</p>
+  <table>
+    <thead><tr><th>Fornecedor</th><th>CNPJ</th><th>Situação</th><th>Déb. Receita</th><th>Déb. Dívida Ativa</th><th>Emissão</th><th>Validade</th><th>Código de controle</th></tr></thead>
+    <tbody>
+      {% for f in cnd_detalhes %}
+      <tr{% if f.status_cnd == "POSITIVA" %} class="alerta"{% endif %}>
+        <td>{{ f.nome_forn }}</td>
+        <td>{{ f.cnpj | cnpj }}</td>
+        <td>{{ f.status_cnd | cnd_label }}{% if f.status_cnd == "FALHA" and f.cnd_falha_motivo %} <span class="pendente">({{ f.cnd_falha_motivo }})</span>{% endif %}</td>
+        <td>{{ f.cnd_debitos_rfb | simnao }}</td>
+        <td>{{ f.cnd_debitos_pgfn | simnao }}</td>
+        <td>{{ f.cnd_emissao_data or "—" }}</td>
+        <td>{{ f.cnd_validade or "—" }}</td>
+        <td>{{ f.cnd_certidao_codigo or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <h2>Grupo A — Crédito Pleno (12% ou 18%)</h2>
   {% if grupo_a %}
   <table>
