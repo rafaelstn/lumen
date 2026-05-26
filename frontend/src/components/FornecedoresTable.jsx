@@ -231,11 +231,11 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
       </td>
 
       {/* CNPJ */}
-      <td className="px-4 py-3 align-top">
+      <td className="whitespace-nowrap px-4 py-3 align-top">
         {f.cnpj ? (
           <div className="flex flex-col items-start gap-1">
-            <span className={`tnum inline-flex items-center gap-1.5 ${f.cnpj_confirmado ? "text-jade-700" : "text-slate-600"}`}>
-              {f.cnpj_confirmado && <ShieldCheck className="h-3.5 w-3.5" />}
+            <span className={`tnum inline-flex items-center gap-1.5 whitespace-nowrap ${f.cnpj_confirmado ? "text-jade-700" : "text-slate-600"}`}>
+              {f.cnpj_confirmado && <ShieldCheck className="h-3.5 w-3.5 shrink-0" />}
               {formatarCnpj(f.cnpj)}
             </span>
             {!f.cnpj_confirmado && (
