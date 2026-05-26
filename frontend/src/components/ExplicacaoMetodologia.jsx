@@ -85,9 +85,10 @@ export default function ExplicacaoMetodologia({ aberto, onFechar }) {
           <section>
             <h3 className="font-600 text-ink-800">3. Impacto financeiro anual</h3>
             <p className="mt-1 text-slate-600">
-              Estimativa do crédito de ICMS em risco por fornecedor:{" "}
-              <strong>total de compras × alíquota ÷ 100</strong>. O painel de risco soma o impacto dos
-              fornecedores de risco alto.
+              É o <strong>ICMS efetivamente aproveitado</strong> de cada fornecedor (o crédito real
+              destacado nas notas), o mesmo valor da coluna <strong>ICMS aproveitado</strong> da tabela.
+              O painel de risco soma esse valor dos fornecedores de risco alto, que é o crédito que se
+              perde se eles não puderem transferi-lo a partir de 2027.
             </p>
           </section>
 

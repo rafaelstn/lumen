@@ -12,11 +12,13 @@ MEDIO = "MEDIO"
 BAIXO = "BAIXO"
 
 
-def _impacto_anual(total_compras, aliquota_max) -> float:
-    """Estimativa do crédito anual em risco = compras * alíquota / 100 (Decimal, 2 casas)."""
-    compras = Decimal(str(total_compras or 0))
-    aliq = Decimal(str(aliquota_max or 0))
-    valor = (compras * aliq / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+def _impacto_anual(total_valor_icms) -> float:
+    """Crédito de ICMS anual em risco = ICMS efetivamente aproveitado nas notas (valor real
+    destacado). É exatamente o crédito que o cliente perde se o fornecedor, inadimplente, não
+    puder transferi-lo a partir de 2027. Usar o ICMS real (e não compras x alíquota máxima) faz
+    o painel bater com a coluna 'ICMS aproveitado' da tabela e não superestimar.
+    """
+    valor = Decimal(str(total_valor_icms or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
     return float(valor)
 
 
@@ -25,7 +27,7 @@ def aplicar_risco(fornecedores: list[dict]) -> None:
     for f in fornecedores:
         grupo = f.get("grupo")
         status = f.get("status_cnd")
-        impacto = _impacto_anual(f.get("total_compras"), f.get("aliquota_max"))
+        impacto = _impacto_anual(f.get("total_valor_icms"))
 
         # Risco restrito ao Grupo A (crédito pleno 12/18%): é onde a perda de crédito
         # em 2027 é financeiramente relevante. Grupo B (crédito simbólico <10%) e C

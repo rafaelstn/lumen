@@ -625,6 +625,12 @@ async def reabrir_analise(request: Request, analise_id: str, ctx: Contexto = Dep
         )
         job = store.obter(analise_id)
 
+    # Recalcula o risco 2027 sobre os dados salvos (cálculo puro, sem custo nem nova consulta):
+    # garante que análises antigas reflitam a fórmula de impacto atual (ICMS real) ao reabrir.
+    if any(f.get("status_cnd") for f in job["fornecedores"]):
+        store.mutar(analise_id, lambda j: risk.aplicar_risco(j["fornecedores"]))
+        job = store.obter(analise_id)
+
     fornecedores = job["fornecedores"]
     resumo = dict(job.get("resumo", {}))
     resumo["cnpj_pendentes"] = sum(1 for f in fornecedores if not f.get("cnpj"))

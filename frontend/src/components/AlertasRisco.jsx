@@ -1,9 +1,11 @@
-import { ShieldAlert, TrendingDown } from "lucide-react";
+import { useState } from "react";
+import { ShieldAlert, TrendingDown, HelpCircle } from "lucide-react";
 import { moeda, numero } from "../utils/format.js";
 
 // Painel de destaque dos fornecedores em risco ALTO para 2027 (grupo A/B com
 // débito ativo na Receita). Só aparece quando há CND consultada e risco alto.
 export default function AlertasRisco({ fornecedores }) {
+  const [ajuda, setAjuda] = useState(false);
   const emRisco = fornecedores
     .filter((f) => f.risco_2027 === "ALTO")
     .sort((a, b) => (b.impacto_financeiro_anual ?? 0) - (a.impacto_financeiro_anual ?? 0));
@@ -25,11 +27,34 @@ export default function AlertasRisco({ fornecedores }) {
           </p>
         </div>
         {impactoTotal > 0 && (
-          <div className="ml-auto hidden shrink-0 text-right sm:block">
+          <div className="relative ml-auto hidden shrink-0 text-right sm:block">
             <p className="flex items-center justify-end gap-1 text-[0.65rem] font-600 uppercase tracking-wider text-signal-600">
               <TrendingDown className="h-3.5 w-3.5" /> Impacto anual
+              <button
+                type="button"
+                onClick={() => setAjuda((v) => !v)}
+                aria-label="Como o impacto anual é calculado"
+                className="ml-0.5 grid h-4 w-4 place-items-center rounded-full border border-signal-300 text-signal-600 transition-colors hover:bg-signal-100"
+              >
+                <HelpCircle className="h-3 w-3" />
+              </button>
             </p>
             <p className="tnum font-display text-2xl font-600 text-signal-700">{moeda(impactoTotal)}</p>
+            {ajuda && (
+              <div className="absolute right-0 top-full z-20 mt-2 w-72 rounded-xl border border-slate-200 bg-white p-3 text-left text-xs font-400 leading-relaxed text-slate-600 shadow-panel">
+                <p className="mb-1 font-600 normal-case tracking-normal text-ink-800">Como calculamos o impacto</p>
+                <p>
+                  É a soma do <strong>ICMS efetivamente aproveitado</strong> (o crédito real destacado
+                  nas notas) dos fornecedores de <strong>risco alto</strong>: Grupo A com débito ativo
+                  na Receita.
+                </p>
+                <p className="mt-1.5">
+                  Esse é o crédito que o cliente perde se o fornecedor, inadimplente, não puder
+                  transferi-lo a partir de 2027. Por isso o valor de cada fornecedor é igual ao da
+                  coluna <strong>ICMS aproveitado</strong> da tabela.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
