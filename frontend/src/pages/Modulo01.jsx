@@ -16,6 +16,7 @@ import {
   EyeOff,
   History,
   ServerCrash,
+  HelpCircle,
 } from "lucide-react";
 import {
   processarArquivos,
@@ -40,6 +41,7 @@ import AlertasRisco from "../components/AlertasRisco.jsx";
 import PainelCnpj from "../components/PainelCnpj.jsx";
 import ProgressBar from "../components/ProgressBar.jsx";
 import ConfirmacaoCusto from "../components/ConfirmacaoCusto.jsx";
+import ExplicacaoMetodologia from "../components/ExplicacaoMetodologia.jsx";
 
 // Recharts é pesado; carregado sob demanda só quando o dashboard aparece.
 const DistribuicaoGrupos = lazy(() => import("../components/DistribuicaoGrupos.jsx"));
@@ -52,6 +54,25 @@ function lerHistoricoOculto() {
     return localStorage.getItem(CHAVE_HISTORICO_OCULTO) === "1";
   } catch {
     return false;
+  }
+}
+
+// Última análise aberta: re-hidratada ao recarregar a página, para não cair na tela
+// de upload. Tolerante a localStorage indisponível.
+const CHAVE_ULTIMA_ANALISE = "lumen:m01:ultima-analise";
+function lerUltimaAnalise() {
+  try {
+    return localStorage.getItem(CHAVE_ULTIMA_ANALISE);
+  } catch {
+    return null;
+  }
+}
+function gravarUltimaAnalise(id) {
+  try {
+    if (id) localStorage.setItem(CHAVE_ULTIMA_ANALISE, id);
+    else localStorage.removeItem(CHAVE_ULTIMA_ANALISE);
+  } catch {
+    /* localStorage indisponível: segue sem persistir */
   }
 }
 
@@ -101,7 +122,12 @@ export default function Modulo01() {
   const abrir = useMutation({
     mutationFn: abrirAnalise,
     onSuccess: (data) => setResultado(data),
+    // Reabrir falhou (ex.: análise apagada): não insistir nessa no próximo reload.
+    onError: () => gravarUltimaAnalise(null),
   });
+
+  // Painel de ajuda explicando a metodologia da análise.
+  const [mostrarMetodologia, setMostrarMetodologia] = useState(false);
 
   function alternarHistorico(oculto) {
     setHistoricoOculto(oculto);
@@ -287,6 +313,21 @@ export default function Modulo01() {
   useEffect(() => pararPolling, []);
   useEffect(() => pararPollingEnriquecimento, []);
 
+  // Persiste a última análise aberta e a re-hidrata ao carregar a página, para que recarregar
+  // não jogue o usuário de volta na tela de upload.
+  useEffect(() => {
+    if (resultado?.job_id) gravarUltimaAnalise(resultado.job_id);
+  }, [resultado?.job_id]);
+
+  const restaurouRef = useRef(false);
+  useEffect(() => {
+    if (restaurouRef.current || resultado) return;
+    restaurouRef.current = true;
+    const id = lerUltimaAnalise();
+    if (id) abrir.mutate(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Ao carregar/reabrir uma análise, re-hidrata o progresso de CND e de enriquecimento
   // a partir do servidor. Sem isso, a barra some ao reabrir uma análise cuja consulta
   // ainda está rodando (o estado local começa zerado).
@@ -342,6 +383,7 @@ export default function Modulo01() {
   function reiniciar() {
     pararPolling();
     pararPollingEnriquecimento();
+    gravarUltimaAnalise(null); // "Nova análise" não deve re-hidratar a anterior no reload
     setResultado(null);
     processar.reset();
     dispararCnd.reset();
@@ -468,6 +510,10 @@ export default function Modulo01() {
   const cndPorConsultar = resultado.fornecedores.filter(
     (f) => f.cnpj && (!f.status_cnd || f.status_cnd === "FALHA")
   ).length;
+  // A CND já foi consultada nesta análise se algum fornecedor tem status ou risco calculado.
+  // Baseia-se nos DADOS (persistem no histórico), não no progresso da sessão: assim o KPI de
+  // risco e o impacto continuam aparecendo após recarregar/reabrir.
+  const temResultadoCnd = resultado.fornecedores.some((f) => f.status_cnd || f.risco_2027);
   const impactoTotal = resultado.fornecedores.reduce(
     (s, f) => s + (Number(f.impacto_financeiro_anual) || 0),
     0
@@ -476,20 +522,31 @@ export default function Modulo01() {
   return (
     <div className="space-y-6 animate-fade-up">
       <ClienteHeader metadados={resultado.metadados} />
+      <ExplicacaoMetodologia aberto={mostrarMetodologia} onFechar={() => setMostrarMetodologia(false)} />
+
+      <div className="-mt-3 flex justify-end">
+        <button
+          type="button"
+          onClick={() => setMostrarMetodologia(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-500 text-slate-500 transition-colors hover:bg-slate-100 hover:text-jade-700"
+        >
+          <HelpCircle className="h-3.5 w-3.5" /> Como esta análise é feita?
+        </button>
+      </div>
 
       {/* KPIs */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <ResultCard titulo="Fornecedores" valor={numero(r.total_fornecedores)} Icone={Users} tom="neutro" sublabel={`${r.cnpj_casados} com CNPJ · ${r.cnpj_pendentes} pendente(s)`} />
         <ResultCard titulo="Crédito ICMS aproveitado" valor={moedaCompacta(r.total_credito_aproveitado)} Icone={Coins} tom="positivo" sublabel={moeda(r.total_credito_aproveitado)} />
         <ResultCard titulo="Compras sem crédito" valor={moedaCompacta(r.total_compras_sem_credito)} Icone={Ban} tom="atencao" sublabel={moeda(r.total_compras_sem_credito)} />
-        {cndConcluida ? (
+        {temResultadoCnd ? (
           <ResultCard titulo="Risco 2027" valor={numero(totalRiscoAlto)} Icone={ShieldAlert} tom={totalRiscoAlto > 0 ? "risco" : "positivo"} alertaPulsante={totalRiscoAlto > 0} sublabel={totalRiscoAlto > 0 ? "fornecedores em risco alto" : "nenhum risco alto"} />
         ) : (
           <ResultCard titulo="Verificação manual (ST)" valor={numero(r.caso_especial)} Icone={Sparkles} tom={r.caso_especial > 0 ? "atencao" : "neutro"} sublabel="possível Substituição Tributária" />
         )}
       </div>
 
-      {cndConcluida && impactoTotal > 0 && (
+      {temResultadoCnd && impactoTotal > 0 && (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <ResultCard titulo="Impacto estimado anual" valor={moeda(impactoTotal)} Icone={TrendingDown} tom="risco" sublabel="crédito de ICMS sob risco em 2027" />
         </div>
