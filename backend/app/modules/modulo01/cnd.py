@@ -40,12 +40,18 @@ async def _sincronizar_historico(job_id: str) -> None:
         )
 
 # Status de regularidade fiscal.
-NEGATIVA = "NEGATIVA"                                   # sem débitos — regular
+NEGATIVA = "NEGATIVA"                                   # sem débitos, regular
 POSITIVA_EFEITO_NEGATIVA = "POSITIVA_EFEITO_NEGATIVA"   # débito parcelado/suspenso
-POSITIVA = "POSITIVA"                                   # débito ativo — irregular
+POSITIVA = "POSITIVA"                                   # débito ativo, irregular
 FALHA = "FALHA"                                         # não foi possível consultar/indeterminado
 
 _SERVICO = "receita-federal/pgfn"
+
+# Codes de erro da Infosimples considerados TRANSITÓRIOS (vale re-tentar): timeout na origem,
+# instabilidade do site consultado, limite de requisições. Qualquer outro code != 200 é tratado
+# como definitivo (CNPJ inválido, parâmetro errado, certidão indisponível por regra), sem retry.
+# Fonte: tabela de códigos da Infosimples (6xx = erro de consulta; 5xx/429 = infra/limite).
+_CODES_TRANSITORIOS = {429, 500, 502, 503, 504, 600, 602, 606, 607, 608, 612, 613}
 
 
 def _mascara_cnpj(cnpj: str) -> str:
@@ -68,15 +74,22 @@ def _mapear_status(item: dict) -> str:
     return FALHA
 
 
-async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
-    """Consulta a CND federal de um CNPJ. Nunca lança: falha vira status FALHA."""
+async def _consultar_cnd_uma_vez(cnpj: str, client: httpx.AsyncClient) -> dict:
+    """Uma tentativa de consulta da CND federal de um CNPJ. Nunca lança.
+
+    Devolve sempre um dict com `status`. Em falha, inclui `cnd_falha_motivo` (texto legível,
+    sem dado sensível) e `_transitoria` (bool interno: orienta o retry; não vai pro cliente).
+    Em sucesso, captura todos os campos úteis retornados pela Infosimples.
+    """
     so_digitos = re.sub(r"\D", "", cnpj or "")
     payload = {
         "token": settings.infosimples_token,
         "cnpj": so_digitos,
         "timeout": str(settings.infosimples_timeout),
-        "ignore_site_receipt": "1",
     }
+    # Por padrão pedimos para a fonte NÃO gerar o comprovante (sem custo/tempo extra de render).
+    if not settings.cnd_capturar_comprovante:
+        payload["ignore_site_receipt"] = "1"
     base = {"cnpj": so_digitos, "data_consulta": datetime.now(timezone.utc).isoformat()}
     try:
         resp = await client.post(
@@ -85,14 +98,33 @@ async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
             timeout=settings.infosimples_timeout + 30,
         )
         body = resp.json()
+    except (httpx.TimeoutException,) as exc:
+        logger.warning("CND timeout cnpj=%s: %s", _mascara_cnpj(so_digitos), exc)
+        return {
+            **base, "status": FALHA, "descricao": "Tempo de resposta excedido na fonte.",
+            "cnd_falha_motivo": "Tempo de resposta excedido na consulta à Receita/PGFN.",
+            "_transitoria": True,
+        }
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("CND falha de rede cnpj=%s: %s", _mascara_cnpj(so_digitos), exc)
-        return {**base, "status": FALHA, "descricao": "Falha de comunicação com a fonte."}
+        return {
+            **base, "status": FALHA, "descricao": "Falha de comunicação com a fonte.",
+            "cnd_falha_motivo": "Falha de comunicação com a fonte de consulta.",
+            "_transitoria": True,
+        }
 
     code = body.get("code")
     if code != 200 or not body.get("data"):
-        logger.info("CND sem resultado cnpj=%s code=%s", _mascara_cnpj(so_digitos), code)
-        return {**base, "status": FALHA, "descricao": body.get("code_message", "Consulta sem resultado.")}
+        motivo = (body.get("code_message") or "Consulta sem resultado.").strip()
+        transitoria = code in _CODES_TRANSITORIOS
+        logger.info(
+            "CND sem resultado cnpj=%s code=%s transitoria=%s",
+            _mascara_cnpj(so_digitos), code, transitoria,
+        )
+        return {
+            **base, "status": FALHA, "descricao": motivo,
+            "cnd_falha_motivo": motivo, "_transitoria": transitoria,
+        }
 
     item = body["data"][0]
     status = _mapear_status(item)
@@ -101,9 +133,45 @@ async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
         **base,
         "status": status,
         "descricao": item.get("descricao") or item.get("situacao") or "",
+        # Campos completos da certidão (alimentam o dashboard e o relatório).
+        "cnd_tipo": item.get("certidao"),
         "certidao_codigo": item.get("certidao_codigo"),
-        "validade_data": item.get("validade_data"),
+        "cnd_debitos_rfb": bool(item.get("debitos_rfb")) if item.get("debitos_rfb") is not None else None,
+        "cnd_debitos_pgfn": bool(item.get("debitos_pgfn")) if item.get("debitos_pgfn") is not None else None,
+        "cnd_emissao_data": item.get("emissao_data"),
+        "validade_data": item.get("validade_data") or item.get("validade"),
+        "cnd_consulta_datahora": item.get("consulta_datahora"),
+        # Link do PDF oficial. Vem null quando enviamos ignore_site_receipt=1.
+        "cnd_comprovante_url": item.get("site_receipt"),
     }
+
+
+async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
+    """Consulta a CND federal de um CNPJ com retry de falha TRANSITÓRIA. Nunca lança.
+
+    Re-tenta (com backoff exponencial limitado por `cnd_retry_backoff_teto_s`) apenas quando a
+    falha é transitória (timeout, 429, 5xx, erro de rede, code de instabilidade da fonte). Falha
+    definitiva (CNPJ inválido, code de negócio) e sucesso retornam de imediato. O teto de
+    tentativas é `1 + cnd_retry_max`. O campo interno `_transitoria` é removido do retorno.
+    """
+    tentativas = max(0, settings.cnd_retry_max) + 1
+    r: dict = {}
+    for i in range(tentativas):
+        r = await _consultar_cnd_uma_vez(cnpj, client)
+        if r["status"] != FALHA or not r.get("_transitoria"):
+            break
+        if i < tentativas - 1:
+            espera = min(
+                settings.cnd_retry_backoff_s * (2 ** i),
+                settings.cnd_retry_backoff_teto_s,
+            )
+            logger.info(
+                "CND retry cnpj=%s tentativa=%d/%d espera=%.1fs",
+                _mascara_cnpj(cnpj), i + 1, tentativas - 1, espera,
+            )
+            await asyncio.sleep(espera)
+    r.pop("_transitoria", None)
+    return r
 
 
 # Referências de tasks em andamento (evita coleta pelo GC).
@@ -156,7 +224,11 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
         async def um(cod_forn: str, cnpj: str) -> None:
             async with sem:
                 if not budget.consumir("cnd"):
-                    r = {"status": FALHA, "descricao": "Teto diário de consultas atingido."}
+                    r = {
+                        "status": FALHA,
+                        "descricao": "Teto diário de consultas atingido.",
+                        "cnd_falha_motivo": "Teto diário de consultas atingido.",
+                    }
                 else:
                     r = await consultar_cnd(cnpj, client)
 
@@ -168,6 +240,16 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
                     if f["cod_forn"] == cod_forn:
                         f["status_cnd"] = r["status"]
                         f["cnd_descricao"] = r.get("descricao")
+                        # Campos completos da certidão (None em FALHA, exceto o motivo).
+                        f["cnd_tipo"] = r.get("cnd_tipo")
+                        f["cnd_certidao_codigo"] = r.get("certidao_codigo")
+                        f["cnd_emissao_data"] = r.get("cnd_emissao_data")
+                        f["cnd_validade"] = r.get("validade_data")
+                        f["cnd_consulta_datahora"] = r.get("cnd_consulta_datahora")
+                        f["cnd_debitos_rfb"] = r.get("cnd_debitos_rfb")
+                        f["cnd_debitos_pgfn"] = r.get("cnd_debitos_pgfn")
+                        f["cnd_comprovante_url"] = r.get("cnd_comprovante_url")
+                        f["cnd_falha_motivo"] = r.get("cnd_falha_motivo")
                         cap["razao_social"] = f.get("nome_forn")
                         break
                 prog = job.get("cnd_progresso") or {"total": total, "consultados": 0, "falhas": 0}

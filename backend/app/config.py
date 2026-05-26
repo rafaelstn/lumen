@@ -53,7 +53,17 @@ class Settings(BaseSettings):
     infosimples_timeout: int = 120  # timeout da consulta na origem (Infosimples), em segundos
     cnd_limite_padrao: int = 20  # teto de fornecedores por chamada (controle de custo)
     cnd_limite_max: int = 200  # clamp do parâmetro 'limite' (anti-abuso)
-    cnd_concorrencia: int = 4  # consultas CND simultâneas
+    cnd_concorrencia: int = 2  # consultas CND simultâneas (reduzido de 4: a Infosimples limita o paralelismo e o 4 gerava timeout/429 em lote)
+    # Retry de falha TRANSITÓRIA na CND (timeout, 429, 5xx, erro de rede). Falha definitiva
+    # (CNPJ inválido, code de negócio) não re-tenta. Reduz o "Falha na consulta" por causa passageira.
+    cnd_retry_max: int = 2  # tentativas EXTRAS após a primeira (total de até 3 chamadas por CNPJ)
+    cnd_retry_backoff_s: float = 2.0  # backoff base (exponencial: base * 2**tentativa) entre tentativas
+    cnd_retry_backoff_teto_s: float = 15.0  # teto de espera por tentativa (não travar o lote)
+    # Captura o link do PDF oficial da certidão (site_receipt). Quando False (padrão), envia
+    # ignore_site_receipt=1 e a Infosimples NÃO gera o comprovante (sem custo/tempo extra de
+    # renderização). Confirmado sem custo financeiro extra (price 0.26 igual); só há tempo
+    # extra em CNPJ que falha (renderização antes de desistir). Ligado: traz o PDF oficial.
+    cnd_capturar_comprovante: bool = True
 
     # Teto global diário de consultas pagas (blindagem de fatura, independe de IP).
     cnd_max_diario: int = 300

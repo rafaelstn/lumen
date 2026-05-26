@@ -15,6 +15,16 @@ class FornecedorResult(BaseModel):
     tem_estorno: bool = False
     status_cnd: str | None = None
     cnd_descricao: str | None = None
+    # Dados completos da certidão (preenchidos no sucesso da consulta da vez).
+    cnd_tipo: str | None = None              # texto/tipo da certidão (campo `certidao` da fonte)
+    cnd_certidao_codigo: str | None = None   # código de controle (ex.: "078A.05F6.FFC6.C668")
+    cnd_emissao_data: str | None = None      # data de emissão ("DD/MM/AAAA")
+    cnd_validade: str | None = None          # validade da certidão ("DD/MM/AAAA")
+    cnd_consulta_datahora: str | None = None # data/hora da consulta na fonte
+    cnd_debitos_rfb: bool | None = None      # há débito na Receita Federal
+    cnd_debitos_pgfn: bool | None = None     # há débito na Dívida Ativa/PGFN
+    cnd_comprovante_url: str | None = None   # link do PDF oficial (null sem ignore_site_receipt)
+    cnd_falha_motivo: str | None = None      # motivo legível quando status_cnd == FALHA
     # Metadado de controle da última CND consultada deste CNPJ (vem do banco ao casar).
     # Informativo: o frontend mostra "CND consultada em X, estava Y" antes de repuxar.
     # NÃO substitui status_cnd (volátil, da consulta da vez) nem dispara reconsulta automática.
