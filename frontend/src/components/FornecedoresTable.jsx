@@ -12,6 +12,8 @@ import {
   CornerDownLeft,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   ArrowUpDown,
   FileText,
   ExternalLink,
@@ -62,6 +64,10 @@ const ORDENAVEIS = {
 
 const FILTRO_VAZIO = { grupo: "", cnd: "", risco: "" };
 
+// Tamanhos de página oferecidos no seletor. 20 é o padrão.
+const TAMANHOS_PAGINA = [10, 20, 50, 100];
+const TAMANHO_PADRAO = 20;
+
 // Tabela de fornecedores classificados. Linhas de risco ALTO ganham faixa
 // vermelha à esquerda; CNPJ pendente abre edição inline (razão social + CNPJ,
 // o backend valida o dígito verificador). Busca, filtros (grupo/CND/risco) e
@@ -75,6 +81,9 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
   // ordem: { coluna, dir }. coluna null = ordem natural (como veio do backend).
   const [ordem, setOrdem] = useState({ coluna: null, dir: "desc" });
   const [expandido, setExpandido] = useState(null);
+  // Paginação client-side, opera sobre a lista já filtrada/ordenada.
+  const [pagina, setPagina] = useState(1);
+  const [tamanhoPagina, setTamanhoPagina] = useState(TAMANHO_PADRAO);
 
   // Status efetivo de CND para filtrar: usa o status atual, cai pro cache, e
   // classifica como SEM_CONSULTA quando não há nenhum dos dois.
@@ -101,6 +110,25 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
     // Cópia antes de ordenar para não mutar o array do pai.
     return [...base].sort((a, b) => (get(a) - get(b)) * fator);
   }, [fornecedores, busca, filtro, ordem]);
+
+  // Reset para a página 1 sempre que muda o que determina o conjunto exibido:
+  // busca, filtros, ordenação ou tamanho de página. Evita parar numa página
+  // que deixou de existir.
+  useEffect(() => {
+    setPagina(1);
+  }, [busca, filtro, ordem, tamanhoPagina]);
+
+  const totalPaginas = Math.max(1, Math.ceil(filtrados.length / tamanhoPagina));
+  // Clamp defensivo: se a lista filtrada encolheu por outro caminho, garante
+  // que a página atual ainda é válida sem aguardar um novo render.
+  const paginaAtual = Math.min(pagina, totalPaginas);
+  const inicio = (paginaAtual - 1) * tamanhoPagina;
+  const fim = inicio + tamanhoPagina;
+  const paginados = useMemo(() => filtrados.slice(inicio, fim), [filtrados, inicio, fim]);
+
+  // Índices 1-based para o indicador "X a Y de N" (0 a 0 quando vazio).
+  const primeiroItem = filtrados.length === 0 ? 0 : inicio + 1;
+  const ultimoItem = Math.min(fim, filtrados.length);
 
   const totalRiscoAlto = fornecedores.filter((f) => f.risco_2027 === "ALTO").length;
   const temFiltro = busca.trim() !== "" || filtro.grupo || filtro.cnd || filtro.risco;
@@ -237,7 +265,7 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
-            {filtrados.map((f) => (
+            {paginados.map((f) => (
               <LinhaFornecedor
                 key={f.cod_forn}
                 f={f}
@@ -266,7 +294,93 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
           </tbody>
         </table>
       </div>
+
+      {filtrados.length > 0 && (
+        <PaginacaoRodape
+          primeiroItem={primeiroItem}
+          ultimoItem={ultimoItem}
+          total={filtrados.length}
+          pagina={paginaAtual}
+          totalPaginas={totalPaginas}
+          tamanhoPagina={tamanhoPagina}
+          onTamanho={setTamanhoPagina}
+          onAnterior={() => setPagina((p) => Math.max(1, p - 1))}
+          onProximo={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+        />
+      )}
     </section>
+  );
+}
+
+// Rodapé de paginação. Seletor de tamanho de página (com label), indicador
+// "X a Y de N" e página atual / total, e os botões Anterior / Próximo
+// (desabilitados nos extremos). Empilha no mobile, distribui no desktop.
+function PaginacaoRodape({
+  primeiroItem,
+  ultimoItem,
+  total,
+  pagina,
+  totalPaginas,
+  tamanhoPagina,
+  onTamanho,
+  onAnterior,
+  onProximo,
+}) {
+  const naPrimeira = pagina <= 1;
+  const naUltima = pagina >= totalPaginas;
+  return (
+    <div className="flex flex-col gap-3 border-t border-slate-100 px-5 py-4 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-center gap-2">
+        <label className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 font-500">
+          <span className="uppercase tracking-wide text-[0.65rem] text-slate-400">Por página</span>
+          <select
+            value={tamanhoPagina}
+            onChange={(e) => onTamanho(Number(e.target.value))}
+            aria-label="Itens por página"
+            className="cursor-pointer bg-transparent pr-1 font-500 focus:outline-none"
+          >
+            {TAMANHOS_PAGINA.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="flex items-center justify-between gap-3 sm:justify-end">
+        <p aria-live="polite" className="tnum text-slate-500">
+          <span className="font-600 text-ink-700">{primeiroItem}</span> a{" "}
+          <span className="font-600 text-ink-700">{ultimoItem}</span> de{" "}
+          <span className="font-600 text-ink-700">{total}</span>
+        </p>
+
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={onAnterior}
+            disabled={naPrimeira}
+            aria-label="Página anterior"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 font-500 text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" /> Anterior
+          </button>
+          <span className="tnum px-1 tabular-nums text-slate-500">
+            Página <span className="font-600 text-ink-700">{pagina}</span> de{" "}
+            <span className="font-600 text-ink-700">{totalPaginas}</span>
+          </span>
+          <button
+            type="button"
+            onClick={onProximo}
+            disabled={naUltima}
+            aria-label="Próxima página"
+            className="inline-flex items-center gap-1 rounded-lg border border-slate-300 px-2.5 py-1.5 font-500 text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
+          >
+            Próximo <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
