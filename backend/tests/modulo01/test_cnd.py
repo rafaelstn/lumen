@@ -169,3 +169,32 @@ async def test_retry_transitoria_nao_estoura_o_teto():
     r = await cnd.consultar_cnd("51260859000170", client)
     assert r["status"] == cnd.FALHA
     assert client.chamadas == 1 + settings.cnd_retry_max
+
+
+async def test_code_615_marca_origem_fora():
+    # 615 = site/aplicativo de origem (Receita/PGFN) indisponível: é a FONTE fora do ar.
+    client = _FakeClient({
+        "code": 615,
+        "code_message": "O site ou aplicativo de origem parece estar indisponível.",
+        "data": [],
+    })
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.FALHA
+    assert r["origem_fora"] is True
+    # Campo interno do retry não vaza.
+    assert "_origem_fora" not in r
+
+
+async def test_falha_comum_nao_marca_origem_fora():
+    # 605 (CNPJ não encontrado) é defeito de negócio, não fonte fora do ar.
+    client = _FakeClient({"code": 605, "code_message": "CNPJ não encontrado.", "data": []})
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.FALHA
+    assert r["origem_fora"] is False
+
+
+async def test_sucesso_nao_marca_origem_fora():
+    client = _FakeClient({"code": 200, "data": [{"conseguiu_emitir_certidao_negativa": True}]})
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.NEGATIVA
+    assert r["origem_fora"] is False

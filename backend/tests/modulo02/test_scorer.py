@@ -35,3 +35,27 @@ def test_faixas():
 def test_score_nunca_passa_de_100_nem_abaixo_de_0():
     r = scorer.calcular_score(simples_optante=False, situacao_cadastral="Ativa", status_cnd="NEGATIVA", fundacao="1990-01-01")
     assert 0 <= r["score"] <= 100
+
+
+def test_sem_cnd_nao_pontua_o_componente_de_regularidade():
+    # incluir_cnd=False: o componente cnd nem entra (parcial), não vira o fallback 8 de FALHA.
+    r = scorer.calcular_score(
+        simples_optante=False, situacao_cadastral="Ativa", status_cnd=None,
+        fundacao="2010-01-01", incluir_cnd=False,
+    )
+    assert "cnd" not in r["componentes"]
+    # regime 30 + situacao 25 + maturidade 10 = 65 (sem o ponto de regularidade).
+    assert r["score"] == 65
+
+
+def test_sem_cnd_difere_de_cnd_falha():
+    # FALHA na consulta pontua o fallback 8; "não consultado" não pontua nada.
+    com_falha = scorer.calcular_score(
+        simples_optante=False, situacao_cadastral="Ativa", status_cnd="FALHA", fundacao="2010-01-01",
+    )
+    sem_cnd = scorer.calcular_score(
+        simples_optante=False, situacao_cadastral="Ativa", status_cnd=None,
+        fundacao="2010-01-01", incluir_cnd=False,
+    )
+    assert com_falha["componentes"]["cnd"] == 8
+    assert com_falha["score"] == sem_cnd["score"] + 8

@@ -26,6 +26,7 @@ def calcular_score(
     situacao_cadastral: str | None,
     status_cnd: str | None,
     fundacao: str | None,
+    incluir_cnd: bool = True,
 ) -> dict:
     componentes: dict[str, int] = {}
 
@@ -46,8 +47,10 @@ def calcular_score(
     else:
         componentes["situacao_cadastral"] = 0  # Inapta/Baixada/desconhecida
 
-    # Regularidade fiscal (CND).
-    componentes["cnd"] = _CND.get(status_cnd or "", 8)
+    # Regularidade fiscal (CND). Avaliação sem CND (incluir_cnd=False) NÃO pontua este
+    # componente (score parcial: ausência do dado não é o mesmo que FALHA na consulta).
+    if incluir_cnd:
+        componentes["cnd"] = _CND.get(status_cnd or "", 8)
 
     # Maturidade do CNPJ (< 2 anos = risco maior).
     anos = _anos_desde(fundacao)

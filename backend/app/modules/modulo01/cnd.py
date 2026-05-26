@@ -51,7 +51,13 @@ _SERVICO = "receita-federal/pgfn"
 # instabilidade do site consultado, limite de requisições. Qualquer outro code != 200 é tratado
 # como definitivo (CNPJ inválido, parâmetro errado, certidão indisponível por regra), sem retry.
 # Fonte: tabela de códigos da Infosimples (6xx = erro de consulta; 5xx/429 = infra/limite).
-_CODES_TRANSITORIOS = {429, 500, 502, 503, 504, 600, 602, 606, 607, 608, 612, 613}
+_CODES_TRANSITORIOS = {429, 500, 502, 503, 504, 600, 602, 606, 607, 608, 612, 613, 615}
+
+# Subconjunto que indica especificamente que a FONTE (Receita Federal/PGFN) está fora do ar,
+# não defeito nosso nem timeout de rede genérico. 615 = "O site/aplicativo de origem parece
+# estar indisponível". Os demais são instabilidade declarada da origem pela Infosimples.
+# Serve para avisar o usuário "a Receita está temporariamente fora do ar" (vs. erro do sistema).
+_CODES_ORIGEM_FORA = {615, 606, 607, 608, 612, 613}
 
 
 def _mascara_cnpj(cnpj: str) -> str:
@@ -117,13 +123,15 @@ async def _consultar_cnd_uma_vez(cnpj: str, client: httpx.AsyncClient) -> dict:
     if code != 200 or not body.get("data"):
         motivo = (body.get("code_message") or "Consulta sem resultado.").strip()
         transitoria = code in _CODES_TRANSITORIOS
+        origem_fora = code in _CODES_ORIGEM_FORA
         logger.info(
-            "CND sem resultado cnpj=%s code=%s transitoria=%s",
-            _mascara_cnpj(so_digitos), code, transitoria,
+            "CND sem resultado cnpj=%s code=%s transitoria=%s origem_fora=%s",
+            _mascara_cnpj(so_digitos), code, transitoria, origem_fora,
         )
         return {
             **base, "status": FALHA, "descricao": motivo,
             "cnd_falha_motivo": motivo, "_transitoria": transitoria,
+            "_origem_fora": origem_fora,
         }
 
     item = body["data"][0]
@@ -171,6 +179,9 @@ async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
             )
             await asyncio.sleep(espera)
     r.pop("_transitoria", None)
+    # Promove a flag interna a campo público estável: indica que a falha foi por a FONTE
+    # (Receita/PGFN) estar fora do ar, para o chamador avisar o usuário corretamente.
+    r["origem_fora"] = bool(r.pop("_origem_fora", False))
     return r
 
 
@@ -207,6 +218,10 @@ def iniciar_consulta_job(job_id: str, limite: int) -> dict:
             "total_com_cnpj": len(com_cnpj),
             "consultados": 0,
             "falhas": 0,
+            # Quantas falhas foram por a FONTE (Receita/PGFN) estar fora do ar (code 615 e
+            # afins). > 0 sinaliza ao frontend "a Receita está temporariamente fora do ar"
+            # em vez de "defeito do sistema".
+            "origem_indisponivel": 0,
             "percentual": 0.0 if total else 100.0,
             "status": "em_andamento" if total else "concluido",
         }
@@ -259,10 +274,15 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
                         f["cnd_falha_motivo"] = r.get("cnd_falha_motivo")
                         cap["razao_social"] = f.get("nome_forn")
                         break
-                prog = job.get("cnd_progresso") or {"total": total, "consultados": 0, "falhas": 0}
+                prog = job.get("cnd_progresso") or {
+                    "total": total, "consultados": 0, "falhas": 0, "origem_indisponivel": 0,
+                }
+                prog.setdefault("origem_indisponivel", 0)
                 prog["consultados"] = prog.get("consultados", 0) + 1
                 if r["status"] == FALHA:
                     prog["falhas"] = prog.get("falhas", 0) + 1
+                    if r.get("origem_fora"):
+                        prog["origem_indisponivel"] = prog.get("origem_indisponivel", 0) + 1
                 prog["percentual"] = round(prog["consultados"] / total * 100, 1) if total else 100.0
                 if prog["consultados"] >= total:
                     prog["status"] = "concluido"

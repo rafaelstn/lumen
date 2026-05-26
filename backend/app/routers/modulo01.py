@@ -371,7 +371,10 @@ async def progresso(job_id: str, ctx: Contexto = Depends(contexto_atual)):
     _checar_posse_job(job, ctx)
     return job.get(
         "cnd_progresso",
-        {"total": 0, "consultados": 0, "falhas": 0, "percentual": 0.0, "status": "nao_iniciado"},
+        {
+            "total": 0, "consultados": 0, "falhas": 0,
+            "origem_indisponivel": 0, "percentual": 0.0, "status": "nao_iniciado",
+        },
     )
 
 
