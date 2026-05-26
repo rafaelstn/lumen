@@ -70,6 +70,26 @@ class EscritorioRemovidoOut(BaseModel):
     removidos: dict[str, int] = {}
 
 
+class TransferirEscritorioIn(BaseModel):
+    """Admin consolida dados de um escritório de ORIGEM em um de DESTINO."""
+
+    origem_id: str = Field(min_length=1, max_length=36)
+    destino_id: str = Field(min_length=1, max_length=36)
+
+
+class TransferirEscritorioOut(BaseModel):
+    """Resposta da transferência: ids e as contagens do que foi movido por tabela.
+
+    `movidos` traz a contagem reatribuída por tabela mais `conflitos_descartados`
+    (registros da origem que colidiam com unique do destino e foram descartados).
+    """
+
+    origem_id: str
+    destino_id: str
+    status: str = "transferido"
+    movidos: dict[str, int] = {}
+
+
 # --- Dashboard admin (visão sistêmica) ---------------------------------------------
 # Dinheiro SEMPRE em centavos inteiros. Nenhum dado pessoal (sócios) entra aqui.
 

@@ -22,6 +22,8 @@ from app.auth.schemas import (
     EscritorioMetricasOut,
     EscritorioRemovidoOut,
     ResumoAdminOut,
+    TransferirEscritorioIn,
+    TransferirEscritorioOut,
 )
 from app.database import async_session_factory
 from app.models.escritorio import Escritorio
@@ -155,3 +157,35 @@ async def deletar_escritorio(escritorio_id: str, ctx: Contexto = Depends(somente
     except Exception:
         raise HTTPException(status_code=503, detail="Indisponível no momento.")
     return EscritorioRemovidoOut(id=escritorio_id, status="removido", removidos=removidos)
+
+
+@router.post("/escritorios/transferir", response_model=TransferirEscritorioOut)
+async def transferir_escritorio(
+    body: TransferirEscritorioIn, ctx: Contexto = Depends(somente_admin)
+):
+    """Admin consolida todos os dados de tenant de um escritório de ORIGEM em um de DESTINO.
+
+    Reatribui análises, associações de fornecedor, tentativas de enriquecimento, logs de
+    consumo, usuários e o M02 (monitorados/alertas/histórico). Conflitos de UNIQUE no
+    destino (mesmo CNPJ/nome) descartam o registro da origem em vez de duplicar. NÃO toca
+    o cache global de fornecedores. Atômico. 400 se origem==destino; 404 se algum não existe.
+    """
+    try:
+        async with async_session_factory() as session:
+            movidos = await auth_service.transferir_escritorio(
+                session, body.origem_id, body.destino_id
+            )
+    except auth_service.TransferenciaInvalida as exc:
+        raise HTTPException(status_code=400, detail=exc.motivo)
+    except auth_service.EscritorioInexistente:
+        raise HTTPException(status_code=404, detail="Escritório de origem ou destino não encontrado.")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Indisponível no momento.")
+    return TransferirEscritorioOut(
+        origem_id=body.origem_id,
+        destino_id=body.destino_id,
+        status="transferido",
+        movidos=movidos,
+    )

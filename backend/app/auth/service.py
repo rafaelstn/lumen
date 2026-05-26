@@ -5,7 +5,7 @@ ou cria os dois, ou nenhum. E-mail é o identificador único do usuário.
 """
 import uuid
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.security import hash_senha, verificar_senha
@@ -31,6 +31,14 @@ class RemocaoProibida(Exception):
 
     Mapeada para 400 no router. `motivo` carrega a mensagem clara da proteção violada.
     """
+
+    def __init__(self, motivo: str):
+        super().__init__(motivo)
+        self.motivo = motivo
+
+
+class TransferenciaInvalida(Exception):
+    """Transferência com origem == destino (mapeada para 400 no router)."""
 
     def __init__(self, motivo: str):
         super().__init__(motivo)
@@ -197,6 +205,184 @@ async def deletar_escritorio(session: AsyncSession, escritorio_id: str) -> dict:
         contagens[chave] = int(res.rowcount or 0)
 
     await session.delete(escritorio)
+    await session.commit()
+    return contagens
+
+
+async def transferir_escritorio(
+    session: AsyncSession, origem_id: str, destino_id: str
+) -> dict:
+    """Reatribui TODOS os dados de tenant de `origem_id` para `destino_id`, atomicamente.
+
+    Caso de uso: o admin gerou dados no escritório default (modo anônimo, antes do login)
+    e quer consolidá-los no escritório dele. Os dois escritórios continuam existindo; só
+    os dados de tenant migram. NÃO toca o cache global de Fornecedor/FornecedorSocio.
+
+    Conflitos de UNIQUE (o destino já tem a mesma chave de negócio): o registro da ORIGEM
+    é DESCARTADO em vez de reatribuído, para não violar a constraint. Tratado em três tabelas:
+      - escritorio_fornecedor: unique (escritorio_id, cnpj).
+      - enriquecimento_tentativa: unique (escritorio_id, nome_normalizado).
+      - fornecedores_monitorados: unique (escritorio_id, cnpj). Aqui há detalhe extra:
+        historico_cnd e alertas referenciam o monitorado por fornecedor_id; quando o
+        monitorado da origem é descartado, seus históricos/alertas são REAPONTADOS para o
+        monitorado equivalente do destino (mesmo CNPJ), preservando o vínculo.
+    Tabelas sem unique (analises, consulta_logs, e o restante de historico_cnd/alertas):
+    reatribuição direta de escritorio_id.
+
+    Erros (nada é gravado):
+      - TransferenciaInvalida: origem == destino (400).
+      - EscritorioInexistente: origem OU destino não existe (404).
+
+    Devolve as contagens do que foi movido por tabela + total de conflitos descartados.
+    """
+    if origem_id == destino_id:
+        raise TransferenciaInvalida("Origem e destino não podem ser o mesmo escritório.")
+
+    origem = await session.get(Escritorio, origem_id)
+    destino = await session.get(Escritorio, destino_id)
+    if origem is None or destino is None:
+        raise EscritorioInexistente()
+
+    contagens: dict[str, int] = {}
+    conflitos_descartados = 0
+
+    # --- 1) Tabelas sem unique por tenant: reatribuição direta de escritorio_id. ---
+    simples = (
+        ("usuarios", Usuario),
+        ("analises", Analise),
+        ("consulta_logs", ConsultaLog),
+    )
+    for chave, model in simples:
+        res = await session.execute(
+            update(model)
+            .where(model.escritorio_id == origem_id)
+            .values(escritorio_id=destino_id)
+        )
+        contagens[chave] = int(res.rowcount or 0)
+
+    # --- 2) escritorio_fornecedor: unique (escritorio_id, cnpj). ---
+    cnpjs_destino = set(
+        (
+            await session.execute(
+                select(EscritorioFornecedor.cnpj).where(
+                    EscritorioFornecedor.escritorio_id == destino_id
+                )
+            )
+        ).scalars()
+    )
+    origem_assoc = (
+        (
+            await session.execute(
+                select(EscritorioFornecedor).where(
+                    EscritorioFornecedor.escritorio_id == origem_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    movidos_assoc = 0
+    for assoc in origem_assoc:
+        if assoc.cnpj in cnpjs_destino:
+            await session.delete(assoc)  # destino já vê este CNPJ: descarta o da origem.
+            conflitos_descartados += 1
+        else:
+            assoc.escritorio_id = destino_id
+            cnpjs_destino.add(assoc.cnpj)
+            movidos_assoc += 1
+    contagens["escritorio_fornecedor"] = movidos_assoc
+
+    # --- 3) enriquecimento_tentativa: unique (escritorio_id, nome_normalizado). ---
+    nomes_destino = set(
+        (
+            await session.execute(
+                select(EnriquecimentoTentativa.nome_normalizado).where(
+                    EnriquecimentoTentativa.escritorio_id == destino_id
+                )
+            )
+        ).scalars()
+    )
+    origem_tent = (
+        (
+            await session.execute(
+                select(EnriquecimentoTentativa).where(
+                    EnriquecimentoTentativa.escritorio_id == origem_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    movidos_tent = 0
+    for tent in origem_tent:
+        if tent.nome_normalizado in nomes_destino:
+            await session.delete(tent)  # destino já tentou este nome: descarta o da origem.
+            conflitos_descartados += 1
+        else:
+            tent.escritorio_id = destino_id
+            nomes_destino.add(tent.nome_normalizado)
+            movidos_tent += 1
+    contagens["enriquecimento_tentativa"] = movidos_tent
+
+    # --- 4) fornecedores_monitorados: unique (escritorio_id, cnpj). ---
+    # Mapa cnpj -> id do monitorado JÁ existente no destino (para reapontar filhos).
+    monitorados_destino = {
+        row.cnpj: row.id
+        for row in (
+            await session.execute(
+                select(FornecedorMonitorado).where(
+                    FornecedorMonitorado.escritorio_id == destino_id
+                )
+            )
+        ).scalars()
+    }
+    origem_mon = (
+        (
+            await session.execute(
+                select(FornecedorMonitorado).where(
+                    FornecedorMonitorado.escritorio_id == origem_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    movidos_mon = 0
+    for mon in origem_mon:
+        destino_mon_id = monitorados_destino.get(mon.cnpj)
+        if destino_mon_id is not None:
+            # Conflito: destino já monitora o CNPJ. Reaponta históricos/alertas do
+            # monitorado da origem para o do destino, depois descarta o monitorado da origem.
+            await session.execute(
+                update(HistoricoCnd)
+                .where(HistoricoCnd.fornecedor_id == mon.id)
+                .values(fornecedor_id=destino_mon_id)
+            )
+            await session.execute(
+                update(Alerta)
+                .where(Alerta.fornecedor_id == mon.id)
+                .values(fornecedor_id=destino_mon_id)
+            )
+            await session.delete(mon)
+            conflitos_descartados += 1
+        else:
+            mon.escritorio_id = destino_id
+            monitorados_destino[mon.cnpj] = mon.id
+            movidos_mon += 1
+    contagens["fornecedores_monitorados"] = movidos_mon
+
+    # --- 5) historico_cnd e alertas: sem unique. Reatribui o restante por escritorio_id.
+    # (fornecedor_id dos filhos de monitorados conflitantes já foi reapontado no passo 4;
+    # aqui só falta migrar o escritorio_id de todos os filhos da origem.)
+    for chave, model in (("historico_cnd", HistoricoCnd), ("alertas", Alerta)):
+        res = await session.execute(
+            update(model)
+            .where(model.escritorio_id == origem_id)
+            .values(escritorio_id=destino_id)
+        )
+        contagens[chave] = int(res.rowcount or 0)
+
+    contagens["conflitos_descartados"] = conflitos_descartados
     await session.commit()
     return contagens
 
