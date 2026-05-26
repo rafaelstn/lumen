@@ -91,17 +91,32 @@ export default function PainelCnpj({
           </div>
         </div>
 
+        {/* Ação principal no header. Se ainda há novos a pesquisar: "Buscar (pago)".
+            Se já pesquisou tudo (só restam já-tentados): o principal vira "Tentar de novo",
+            sem o botão desabilitado confundindo. */}
         {pendentes > 0 && !confirmando && !rodando && (
-          <button
-            type="button"
-            onClick={() => setConfirmando("novos")}
-            disabled={enriquecendo || carregandoPendentes || semNovos}
-            className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-600 text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
-            title={semNovos ? "Todos os pendentes já foram pesquisados sem sucesso" : undefined}
-          >
-            {carregandoPendentes ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-            Buscar (pago)
-          </button>
+          semNovos && temJaTentados ? (
+            <button
+              type="button"
+              onClick={() => setConfirmando("forcar")}
+              disabled={enriquecendo}
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-600 text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Tentar de novo ({numero(jaTentados)})
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setConfirmando("novos")}
+              disabled={enriquecendo || carregandoPendentes || semNovos}
+              className="inline-flex shrink-0 items-center gap-2 rounded-xl bg-amber-600 px-4 py-2.5 text-sm font-600 text-white transition-colors hover:bg-amber-700 disabled:opacity-50"
+              title={semNovos ? "Todos os pendentes já foram pesquisados sem sucesso" : undefined}
+            >
+              {carregandoPendentes ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              Buscar (pago)
+            </button>
+          )
         )}
 
         {rodando && (
@@ -146,8 +161,10 @@ export default function PainelCnpj({
         </div>
       )}
 
-      {/* Ação secundária discreta: só quando há já-tentados e nada está em curso */}
-      {temJaTentados && !confirmando && !rodando && (
+      {/* Ação secundária: só quando há NOVOS e também já-tentados (opção de forçar
+          incluindo os já-tentados). Se só restam já-tentados, o botão principal no
+          header já é o "Tentar de novo", então não duplica aqui. */}
+      {temJaTentados && !semNovos && !confirmando && !rodando && (
         <div className="mt-3">
           <button
             type="button"
