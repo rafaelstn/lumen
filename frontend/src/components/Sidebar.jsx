@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   ShieldCheck,
   FilePlus2,
@@ -50,6 +50,7 @@ const MODULOS = [
 
 export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
   const { ehAdmin, usuario, logout } = useAuth();
+  const [confirmandoSaida, setConfirmandoSaida] = useState(false);
 
   // Fecha o drawer com Esc no mobile (acessibilidade de teclado).
   useEffect(() => {
@@ -180,7 +181,7 @@ export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
               </div>
               <button
                 type="button"
-                onClick={logout}
+                onClick={() => setConfirmandoSaida(true)}
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-slate-400 transition-colors hover:bg-white/10 hover:text-signal-400"
                 aria-label="Sair da conta"
                 title="Sair"
@@ -198,6 +199,54 @@ export default function Sidebar({ view, onNavegar, aberto, onFechar }) {
           </p>
         </div>
       </aside>
+
+      {/* Confirmação de saída: evita deslogar por clique acidental. Fora do <aside> porque ele
+          tem transform (que prenderia um position:fixed ao próprio aside em vez do viewport). */}
+      {confirmandoSaida && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirmar saída"
+        >
+          <div
+            className="absolute inset-0 bg-ink-950/60 backdrop-blur-sm"
+            onClick={() => setConfirmandoSaida(false)}
+          />
+          <div className="relative z-10 w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-panel">
+            <div className="flex items-start gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-signal-50 text-signal-600">
+                <LogOut className="h-5 w-5" />
+              </span>
+              <div>
+                <h2 className="font-display text-base font-600 text-ink-800">Sair da conta?</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Você precisará entrar de novo com e-mail e senha para voltar.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmandoSaida(false)}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-600 text-slate-600 transition-colors hover:bg-slate-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setConfirmandoSaida(false);
+                  logout();
+                }}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-signal-600 px-4 py-2 text-sm font-600 text-white transition-colors hover:bg-signal-700"
+              >
+                <LogOut className="h-4 w-4" /> Sair
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

@@ -339,7 +339,17 @@ export default function Modulo01() {
     if (restaurouRef.current || resultado) return;
     restaurouRef.current = true;
     const id = lerUltimaAnalise();
-    if (id) abrir.mutate(id);
+    if (!id) return;
+    // Restauração SILENCIOSA: usa a chamada direta (não a mutation `abrir`), para que uma
+    // falha — análise apagada ou de outro escritório — não dispare o alerta vermelho de
+    // reabrir manual. Some sem ruído e apenas limpa a referência salva.
+    (async () => {
+      try {
+        setResultado(await abrirAnalise(id));
+      } catch {
+        gravarUltimaAnalise(null);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
