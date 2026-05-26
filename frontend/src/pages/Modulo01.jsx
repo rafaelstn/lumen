@@ -601,20 +601,22 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
             <p className="text-sm text-slate-500">
               Consulte a Certidão Negativa de Débitos de cada fornecedor para avaliar o risco de perda de crédito em 2027.
             </p>
-            <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-slate-500">
+            <p className="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-xs text-slate-500">
               <Coins className="h-3.5 w-3.5 text-amber-500" />
               Consulta paga · {numero(qtdComCnpj || 0)} com CNPJ ≈{" "}
               <strong className="tnum text-ink-700">{moeda(totalCent / 100)}</strong>
             </p>
-            <button
-              type="button"
-              onClick={() => setConfirmando(true)}
-              disabled={disparando || !qtdComCnpj}
-              className="mt-4 inline-flex items-center gap-2 rounded-xl bg-jade-600 px-5 py-2.5 text-sm font-600 text-white transition-colors hover:bg-jade-700 disabled:opacity-50"
-            >
-              {disparando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-              {disparando ? "Iniciando..." : "Consultar regularidade"}
-            </button>
+            <div className="mt-4 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setConfirmando(true)}
+                disabled={disparando || !qtdComCnpj}
+                className="inline-flex items-center gap-2 rounded-xl bg-jade-600 px-5 py-2.5 text-sm font-600 text-white transition-colors hover:bg-jade-700 disabled:opacity-50"
+              >
+                {disparando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+                {disparando ? "Iniciando..." : "Consultar regularidade"}
+              </button>
+            </div>
           </div>
         )}
       </div>

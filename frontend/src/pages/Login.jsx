@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Loader2, AlertCircle, Mail, Lock, Building2, ShieldCheck } from "lucide-react";
+import { Loader2, AlertCircle, Mail, Lock, Building2, ShieldCheck, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "../context/AuthContext.jsx";
 
 // Tela de acesso do Lumen: alterna entre Login e Cadastro no mesmo card.
@@ -207,6 +207,10 @@ function Cartao({ titulo, subtitulo, children }) {
 
 function Campo({ id, rotulo, tipo, Icone, valor, onChange, ajuda, ajudaErro, ...rest }) {
   const descId = ajuda ? `${id}-ajuda` : undefined;
+  // Campo de senha ganha o "olhinho" para mostrar/ocultar o que foi digitado.
+  const ehSenha = tipo === "password";
+  const [mostrar, setMostrar] = useState(false);
+  const tipoInput = ehSenha && mostrar ? "text" : tipo;
   return (
     <div>
       <label htmlFor={id} className="block text-sm font-500 text-ink-800">
@@ -216,13 +220,14 @@ function Campo({ id, rotulo, tipo, Icone, valor, onChange, ajuda, ajudaErro, ...
         <Icone className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
         <input
           id={id}
-          type={tipo}
+          type={tipoInput}
           value={valor}
           onChange={(e) => onChange(e.target.value)}
           aria-describedby={descId}
           aria-invalid={ajudaErro ? "true" : undefined}
           className={[
-            "w-full rounded-lg border bg-white py-2.5 pl-9 pr-3 text-sm text-ink-900 outline-none transition-colors",
+            "w-full rounded-lg border bg-white py-2.5 pl-9 text-sm text-ink-900 outline-none transition-colors",
+            ehSenha ? "pr-10" : "pr-3",
             "placeholder:text-slate-400 focus:ring-2 focus:ring-jade-500/30",
             ajudaErro
               ? "border-signal-400 focus:border-signal-500"
@@ -230,6 +235,17 @@ function Campo({ id, rotulo, tipo, Icone, valor, onChange, ajuda, ajudaErro, ...
           ].join(" ")}
           {...rest}
         />
+        {ehSenha && (
+          <button
+            type="button"
+            onClick={() => setMostrar((v) => !v)}
+            aria-label={mostrar ? "Ocultar senha" : "Mostrar senha"}
+            title={mostrar ? "Ocultar senha" : "Mostrar senha"}
+            className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-slate-400 transition-colors hover:text-ink-700 focus:outline-none focus:text-ink-700"
+          >
+            {mostrar ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+          </button>
+        )}
       </div>
       {ajuda && (
         <p id={descId} className={`mt-1 text-xs ${ajudaErro ? "text-signal-600" : "text-slate-400"}`}>
