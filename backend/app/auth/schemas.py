@@ -90,6 +90,37 @@ class TransferirEscritorioOut(BaseModel):
     movidos: dict[str, int] = {}
 
 
+class ResetAmbienteIn(BaseModel):
+    """Confirmação textual obrigatória para o reset de ambiente (proteção contra acidente).
+
+    O texto precisa ser exatamente "APAGAR TUDO". Qualquer outro valor é rejeitado na
+    borda (422 pelo Pydantic) ou no router (400), sem apagar nada.
+    """
+
+    confirmar: str = Field(min_length=1, max_length=20)
+
+
+class ResetAmbienteApagados(BaseModel):
+    """Contagens do que foi apagado por tabela no reset."""
+
+    analises: int = 0
+    fornecedores: int = 0
+    fornecedor_socios: int = 0
+    escritorio_fornecedor: int = 0
+    enriquecimento_tentativa: int = 0
+    consulta_logs: int = 0
+    monitorados: int = 0
+    alertas: int = 0
+    historico_cnd: int = 0
+
+
+class ResetAmbienteOut(BaseModel):
+    """Resposta do reset: status fixo + contagens por tabela."""
+
+    status: str = "resetado"
+    apagados: ResetAmbienteApagados
+
+
 # --- Dashboard admin (visão sistêmica) ---------------------------------------------
 # Dinheiro SEMPRE em centavos inteiros. Nenhum dado pessoal (sócios) entra aqui.
 

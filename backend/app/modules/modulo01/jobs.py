@@ -104,5 +104,13 @@ class JobStore:
             fn(job)
             return True
 
+    def limpar_tudo(self) -> int:
+        """Remove todos os jobs em memória. Devolve quantos foram removidos. Usado no reset de ambiente."""
+        with self._lock:
+            total = len(self._jobs)
+            self._jobs.clear()
+            self._criado_mono.clear()
+            return total
+
 
 store = JobStore(ttl_seconds=settings.job_ttl_seconds, cap=settings.job_cap)

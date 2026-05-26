@@ -12,7 +12,13 @@ from app.auth.security import hash_senha, verificar_senha
 from app.config import settings
 from app.models.analise import Analise
 from app.models.escritorio import Escritorio
-from app.models.fornecedor import EscritorioFornecedor, EnriquecimentoTentativa
+from app.models.fornecedor import (
+    EnriquecimentoTentativa,
+    EscritorioFornecedor,
+    Fornecedor,
+    FornecedorSocio,
+)
+from app.modules.modulo01.jobs import store as job_store
 from app.models.usuario import ROLE_ADMIN, ROLE_ESCRITORIO, Usuario
 from app.modules.consumo.models import ConsultaLog
 from app.modules.modulo02.models import Alerta, FornecedorMonitorado, HistoricoCnd
@@ -384,6 +390,53 @@ async def transferir_escritorio(
 
     contagens["conflitos_descartados"] = conflitos_descartados
     await session.commit()
+    return contagens
+
+
+async def resetar_ambiente(session: AsyncSession) -> dict:
+    """Zera TODOS os dados de análise/consulta/cache do sistema, numa transação atômica.
+
+    Reset GLOBAL (apaga todas as linhas, não só de um tenant): é ambiente de teste/piloto e o
+    admin quer refazer um teste do zero (resubir planilha, reenriquecer, reconsultar CND). Mantém
+    intactos Usuario e Escritorio (as contas e o login, inclusive o admin), por isso o login segue
+    funcionando após o reset.
+
+    Apaga: analises, fornecedores + fornecedor_socios (cache global de CNPJ + sócios),
+    escritorio_fornecedor (associações), enriquecimento_tentativa, consulta_logs e o M02
+    (fornecedores_monitorados, alertas, historico_cnd).
+
+    Ordem de deleção respeita dependências: os filhos do M02 (historico_cnd e alertas, que
+    referenciam o monitorado por fornecedor_id) são apagados ANTES de fornecedores_monitorados;
+    fornecedor_socios (FK lógica por CNPJ) antes de fornecedores.
+
+    Também limpa os jobs em memória do M01 (estado volátil de análises abertas), para não reabrir
+    uma análise órfã cujo registro no banco já foi apagado.
+
+    Devolve as contagens do que foi apagado por tabela.
+    """
+    # Filhos antes de pais. Cada par é (chave_resposta, model).
+    alvos = (
+        ("analises", Analise),
+        ("historico_cnd", HistoricoCnd),
+        ("alertas", Alerta),
+        ("monitorados", FornecedorMonitorado),
+        ("escritorio_fornecedor", EscritorioFornecedor),
+        ("enriquecimento_tentativa", EnriquecimentoTentativa),
+        ("consulta_logs", ConsultaLog),
+        ("fornecedor_socios", FornecedorSocio),
+        ("fornecedores", Fornecedor),
+    )
+    contagens: dict[str, int] = {}
+    for chave, model in alvos:
+        res = await session.execute(delete(model))
+        contagens[chave] = int(res.rowcount or 0)
+
+    await session.commit()
+
+    # Jobs em memória são voláteis (TTL), mas limpamos explicitamente para não restar
+    # análise viva apontando para registro já apagado. Fora da transação do banco.
+    job_store.limpar_tudo()
+
     return contagens
 
 

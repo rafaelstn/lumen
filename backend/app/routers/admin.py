@@ -21,6 +21,9 @@ from app.auth.schemas import (
     EscritorioDetalheOut,
     EscritorioMetricasOut,
     EscritorioRemovidoOut,
+    ResetAmbienteApagados,
+    ResetAmbienteIn,
+    ResetAmbienteOut,
     ResumoAdminOut,
     TransferirEscritorioIn,
     TransferirEscritorioOut,
@@ -157,6 +160,27 @@ async def deletar_escritorio(escritorio_id: str, ctx: Contexto = Depends(somente
     except Exception:
         raise HTTPException(status_code=503, detail="Indisponível no momento.")
     return EscritorioRemovidoOut(id=escritorio_id, status="removido", removidos=removidos)
+
+
+@router.post("/reset-ambiente", response_model=ResetAmbienteOut)
+async def reset_ambiente(body: ResetAmbienteIn, ctx: Contexto = Depends(somente_admin)):
+    """Zera TODOS os dados de análise/consulta/cache do sistema. Mantém contas e login. Só admin.
+
+    Proteção contra acidente: exige body {"confirmar": "APAGAR TUDO"} exato. Qualquer outro
+    texto retorna 400 sem apagar nada. Apaga (reset global) analises, fornecedores +
+    fornecedor_socios, escritorio_fornecedor, enriquecimento_tentativa, consulta_logs e o M02
+    (monitorados/alertas/historico_cnd). NÃO apaga Usuario nem Escritorio. Atômico.
+    """
+    if body.confirmar != "APAGAR TUDO":
+        raise HTTPException(status_code=400, detail='Confirmação inválida. Envie {"confirmar": "APAGAR TUDO"}.')
+    try:
+        async with async_session_factory() as session:
+            apagados = await auth_service.resetar_ambiente(session)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Indisponível no momento.")
+    return ResetAmbienteOut(status="resetado", apagados=ResetAmbienteApagados(**apagados))
 
 
 @router.post("/escritorios/transferir", response_model=TransferirEscritorioOut)
