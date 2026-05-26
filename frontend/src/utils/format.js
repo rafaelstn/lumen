@@ -72,7 +72,7 @@ export const STATUS_CND = {
     regular: true,
   },
   POSITIVA: { rotulo: "Positiva (débito)", classe: "bg-signal-50 text-signal-700 border-signal-200", regular: false },
-  FALHA: { rotulo: "Falha na consulta", classe: "bg-slate-100 text-slate-500 border-slate-300", regular: null },
+  FALHA: { rotulo: "Pendente", classe: "bg-slate-100 text-slate-500 border-slate-300", regular: null },
 };
 
 export function statusCndMeta(status) {

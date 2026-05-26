@@ -588,6 +588,8 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
             total={progresso?.total}
             consultados={progresso?.consultados}
             falhas={progresso?.falhas}
+            termoFalha="pendente"
+            termoFalhas="pendentes"
             ativo
           />
         ) : confirmando ? (
@@ -608,6 +610,8 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
               total={progresso?.total}
               consultados={progresso?.consultados}
               falhas={progresso?.falhas}
+              termoFalha="pendente"
+              termoFalhas="pendentes"
               ativo={false}
               label="Consulta concluída"
             />
@@ -675,8 +679,8 @@ function AvisoReceitaForaDoAr({ quantidade, className = "" }) {
         <strong>
           {quantidade} consulta{quantidade > 1 ? "s" : ""}
         </strong>{" "}
-        falhou por isso, não por defeito do sistema. Em alguns minutos, clique em{" "}
-        <strong>Consultar regularidade</strong> de novo para re-tentar apenas as que falharam.
+        ficou pendente por isso, não por defeito do sistema. Em alguns minutos, clique em{" "}
+        <strong>Consultar regularidade</strong> de novo para re-tentar apenas as pendentes.
       </span>
     </div>
   );

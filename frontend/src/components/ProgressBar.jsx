@@ -1,6 +1,11 @@
 // Barra de progresso da consulta CND. Mostra percentual, "X de Y" e falhas.
 // Efeito "scan" sobre o preenchimento sinaliza atividade em curso.
-export default function ProgressBar({ percentual = 0, total, consultados, falhas = 0, ativo = true, label }) {
+export default function ProgressBar({
+  percentual = 0, total, consultados, falhas = 0, ativo = true, label,
+  // Termo do contador de falhas. Default "falha(s)"; a CND passa "pendente(s)" para não
+  // soar defeito do sistema quando a Receita só não retornou ainda.
+  termoFalha = "falha", termoFalhas = "falhas",
+}) {
   const pct = Math.min(100, Math.max(0, Number(percentual) || 0));
 
   return (
@@ -31,7 +36,7 @@ export default function ProgressBar({ percentual = 0, total, consultados, falhas
         {falhas > 0 && (
           <span className="tnum inline-flex items-center gap-1 text-amber-700">
             <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-            {falhas} {falhas === 1 ? "falha" : "falhas"}
+            {falhas} {falhas === 1 ? termoFalha : termoFalhas}
           </span>
         )}
       </div>

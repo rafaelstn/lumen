@@ -44,7 +44,7 @@ const OPCOES_CND = [
   { valor: "NEGATIVA", rotulo: "Negativa / regular" },
   { valor: "POSITIVA_EFEITO_NEGATIVA", rotulo: "Positiva c/ efeito negativo" },
   { valor: "POSITIVA", rotulo: "Positiva (devedor)" },
-  { valor: "FALHA", rotulo: "Falha na consulta" },
+  { valor: "FALHA", rotulo: "Pendente" },
   { valor: "SEM_CONSULTA", rotulo: "Sem consulta" },
 ];
 
@@ -762,7 +762,7 @@ function FichaCnd({ f }) {
               <p className="text-sm font-600 text-amber-800">
                 {origemFora
                   ? "A Receita Federal/PGFN está instável"
-                  : "Não foi possível consultar a CND"}
+                  : "Consulta ainda pendente"}
               </p>
               <p className="mt-1 text-xs leading-relaxed text-amber-700">
                 Motivo: {f.cnd_falha_motivo || "não informado pelo serviço de consulta."}
@@ -771,7 +771,7 @@ function FichaCnd({ f }) {
                 <RotateCcw className="h-3 w-3 shrink-0" />
                 {origemFora
                   ? "É instabilidade da fonte oficial (Receita Federal/PGFN), não defeito do sistema nem débito do fornecedor. Tente consultar de novo em alguns minutos."
-                  : "Isto é uma falha na consulta, não significa que o fornecedor tem débito. Você pode tentar consultar de novo."}
+                  : "A consulta ainda não retornou. Isto não significa que o fornecedor tem débito; é só uma consulta pendente. Você pode consultar de novo."}
               </p>
             </div>
           </div>

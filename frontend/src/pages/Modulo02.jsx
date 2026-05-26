@@ -957,10 +957,10 @@ function AvisoReceitaForaDoAr({ quantidade, className = "" }) {
             <strong>
               {quantidade} consulta{quantidade > 1 ? "s" : ""} de CND
             </strong>{" "}
-            falhou por isso, não por defeito do sistema.{" "}
+            ficou pendente por isso, não por defeito do sistema.{" "}
           </>
         )}
-        As consultas que falharam por indisponibilidade da fonte podem ser refeitas em alguns
+        As consultas pendentes por indisponibilidade da fonte podem ser refeitas em alguns
         minutos.
       </span>
     </div>
