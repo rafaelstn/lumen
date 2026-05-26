@@ -10,6 +10,12 @@ import {
   Database,
   Loader2,
   CornerDownLeft,
+  ChevronDown,
+  ChevronUp,
+  ArrowUpDown,
+  FileText,
+  ExternalLink,
+  RotateCcw,
 } from "lucide-react";
 import {
   moeda,
@@ -17,33 +23,101 @@ import {
   CORES_GRUPO,
   statusCndMeta,
   riscoMeta,
+  validadeCnd,
   formatarCnpj,
 } from "../utils/format.js";
 import { buscarFornecedores } from "../services/api.js";
 
+// Opções de filtro. O valor "" significa "todos".
+const OPCOES_GRUPO = [
+  { valor: "", rotulo: "Todos os grupos" },
+  { valor: "A", rotulo: "Grupo A" },
+  { valor: "B", rotulo: "Grupo B" },
+  { valor: "C", rotulo: "Grupo C" },
+  { valor: "INDEFINIDO", rotulo: "Indefinido" },
+];
+
+const OPCOES_CND = [
+  { valor: "", rotulo: "Toda CND" },
+  { valor: "NEGATIVA", rotulo: "Negativa / regular" },
+  { valor: "POSITIVA_EFEITO_NEGATIVA", rotulo: "Positiva c/ efeito negativo" },
+  { valor: "POSITIVA", rotulo: "Positiva (devedor)" },
+  { valor: "FALHA", rotulo: "Falha na consulta" },
+  { valor: "SEM_CONSULTA", rotulo: "Sem consulta" },
+];
+
+const OPCOES_RISCO = [
+  { valor: "", rotulo: "Todo risco" },
+  { valor: "ALTO", rotulo: "Risco alto" },
+  { valor: "MEDIO", rotulo: "Risco médio" },
+  { valor: "BAIXO", rotulo: "Risco baixo" },
+];
+
+// Colunas ordenáveis: cada uma extrai o número comparável do fornecedor.
+const ORDENAVEIS = {
+  total_compras: (f) => Number(f.total_compras) || 0,
+  aliquota_max: (f) => Number(f.aliquota_max) || 0,
+  total_valor_icms: (f) => Number(f.total_valor_icms) || 0,
+};
+
+const FILTRO_VAZIO = { grupo: "", cnd: "", risco: "" };
+
 // Tabela de fornecedores classificados. Linhas de risco ALTO ganham faixa
 // vermelha à esquerda; CNPJ pendente abre edição inline (razão social + CNPJ,
-// o backend valida o dígito verificador). Busca client-side por nome/CNPJ.
+// o backend valida o dígito verificador). Busca, filtros (grupo/CND/risco) e
+// ordenação por coluna são combináveis e rodam client-side.
 export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando }) {
   const [editando, setEditando] = useState(null);
   const [cnpj, setCnpj] = useState("");
   const [razao, setRazao] = useState("");
   const [busca, setBusca] = useState("");
-  const [soRisco, setSoRisco] = useState(false);
+  const [filtro, setFiltro] = useState(FILTRO_VAZIO);
+  // ordem: { coluna, dir }. coluna null = ordem natural (como veio do backend).
+  const [ordem, setOrdem] = useState({ coluna: null, dir: "desc" });
+  const [expandido, setExpandido] = useState(null);
+
+  // Status efetivo de CND para filtrar: usa o status atual, cai pro cache, e
+  // classifica como SEM_CONSULTA quando não há nenhum dos dois.
+  function statusCndEfetivo(f) {
+    return f.status_cnd || f.cnd_status_cache || "SEM_CONSULTA";
+  }
 
   const filtrados = useMemo(() => {
     const q = busca.trim().toLowerCase();
-    return fornecedores.filter((f) => {
-      if (soRisco && f.risco_2027 !== "ALTO") return false;
+    const base = fornecedores.filter((f) => {
+      if (filtro.grupo && (f.grupo ?? "INDEFINIDO") !== filtro.grupo) return false;
+      if (filtro.risco && (f.risco_2027 ?? "") !== filtro.risco) return false;
+      if (filtro.cnd && statusCndEfetivo(f) !== filtro.cnd) return false;
       if (!q) return true;
       return (
         (f.nome_forn ?? "").toLowerCase().includes(q) ||
         (f.cnpj ?? "").toLowerCase().includes(q)
       );
     });
-  }, [fornecedores, busca, soRisco]);
+
+    if (!ordem.coluna) return base;
+    const get = ORDENAVEIS[ordem.coluna];
+    const fator = ordem.dir === "asc" ? 1 : -1;
+    // Cópia antes de ordenar para não mutar o array do pai.
+    return [...base].sort((a, b) => (get(a) - get(b)) * fator);
+  }, [fornecedores, busca, filtro, ordem]);
 
   const totalRiscoAlto = fornecedores.filter((f) => f.risco_2027 === "ALTO").length;
+  const temFiltro = busca.trim() !== "" || filtro.grupo || filtro.cnd || filtro.risco;
+
+  function limpar() {
+    setBusca("");
+    setFiltro(FILTRO_VAZIO);
+  }
+
+  // Clique no cabeçalho: 1º clique ordena desc, 2º alterna asc, 3º volta ao natural.
+  function ordenarPor(coluna) {
+    setOrdem((o) => {
+      if (o.coluna !== coluna) return { coluna, dir: "desc" };
+      if (o.dir === "desc") return { coluna, dir: "asc" };
+      return { coluna: null, dir: "desc" };
+    });
+  }
 
   function abrir(f) {
     setEditando(f.cod_forn);
@@ -60,21 +134,58 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white shadow-panel">
-      <div className="flex flex-col gap-3 border-b border-slate-100 p-5 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h2 className="font-display text-lg font-600 text-ink-900">Fornecedores</h2>
-          <p className="mt-0.5 text-xs text-slate-500">
-            {filtrados.length} de {fornecedores.length} exibidos
-          </p>
+      <div className="flex flex-col gap-3 border-b border-slate-100 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="font-display text-lg font-600 text-ink-900">Fornecedores</h2>
+            <p className="mt-0.5 text-xs text-slate-500">
+              {filtrados.length} de {fornecedores.length} exibidos
+            </p>
+          </div>
+          <div className="relative sm:w-64">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={busca}
+              onChange={(e) => setBusca(e.target.value)}
+              placeholder="Buscar fornecedor ou CNPJ"
+              aria-label="Buscar fornecedor"
+              className="w-full rounded-lg border border-slate-300 py-2 pl-8 pr-3 text-sm placeholder:text-slate-400 focus:border-jade-400"
+            />
+          </div>
         </div>
+
+        {/* Linha de filtros e ordenação, combinável com a busca acima. */}
         <div className="flex flex-wrap items-center gap-2">
+          <FiltroSelect
+            label="Grupo"
+            value={filtro.grupo}
+            onChange={(v) => setFiltro((s) => ({ ...s, grupo: v }))}
+            opcoes={OPCOES_GRUPO}
+          />
+          <FiltroSelect
+            label="CND"
+            value={filtro.cnd}
+            onChange={(v) => setFiltro((s) => ({ ...s, cnd: v }))}
+            opcoes={OPCOES_CND}
+          />
+          <FiltroSelect
+            label="Risco 2027"
+            value={filtro.risco}
+            onChange={(v) => setFiltro((s) => ({ ...s, risco: v }))}
+            opcoes={OPCOES_RISCO}
+          />
+
           {totalRiscoAlto > 0 && (
             <button
               type="button"
-              onClick={() => setSoRisco((v) => !v)}
+              aria-pressed={filtro.risco === "ALTO"}
+              onClick={() =>
+                setFiltro((s) => ({ ...s, risco: s.risco === "ALTO" ? "" : "ALTO" }))
+              }
               className={[
                 "inline-flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-500 transition-colors",
-                soRisco
+                filtro.risco === "ALTO"
                   ? "border-signal-300 bg-signal-600 text-white"
                   : "border-signal-200 bg-signal-50 text-signal-700 hover:bg-signal-100",
               ].join(" ")}
@@ -83,17 +194,16 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
               Risco alto ({totalRiscoAlto})
             </button>
           )}
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="search"
-              value={busca}
-              onChange={(e) => setBusca(e.target.value)}
-              placeholder="Buscar fornecedor ou CNPJ"
-              aria-label="Buscar fornecedor"
-              className="w-full rounded-lg border border-slate-300 py-2 pl-8 pr-3 text-sm placeholder:text-slate-400 focus:border-jade-400 sm:w-64"
-            />
-          </div>
+
+          {temFiltro && (
+            <button
+              type="button"
+              onClick={limpar}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 px-3 py-2 text-xs font-500 text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              <X className="h-3.5 w-3.5" /> Limpar filtros
+            </button>
+          )}
         </div>
       </div>
 
@@ -106,9 +216,24 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
               <th className="px-4 py-3 font-600">CNPJ</th>
               <th className="px-4 py-3 font-600">CND</th>
               <th className="px-4 py-3 font-600">Risco 2027</th>
-              <th className="px-4 py-3 text-right font-600">Compras</th>
-              <th className="px-4 py-3 text-right font-600">Alíq. máx.</th>
-              <th className="px-4 py-3 text-right font-600">ICMS aprov.</th>
+              <ThOrdenavel
+                rotulo="Compras"
+                coluna="total_compras"
+                ordem={ordem}
+                onOrdenar={ordenarPor}
+              />
+              <ThOrdenavel
+                rotulo="Alíq. máx."
+                coluna="aliquota_max"
+                ordem={ordem}
+                onOrdenar={ordenarPor}
+              />
+              <ThOrdenavel
+                rotulo="ICMS aprov."
+                coluna="total_valor_icms"
+                ordem={ordem}
+                onOrdenar={ordenarPor}
+              />
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
@@ -117,6 +242,10 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
                 key={f.cod_forn}
                 f={f}
                 emEdicao={editando === f.cod_forn}
+                expandido={expandido === f.cod_forn}
+                onToggleDetalhe={() =>
+                  setExpandido((id) => (id === f.cod_forn ? null : f.cod_forn))
+                }
                 cnpj={cnpj}
                 razao={razao}
                 setCnpj={setCnpj}
@@ -138,6 +267,67 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
         </table>
       </div>
     </section>
+  );
+}
+
+// Select de filtro com rótulo embutido. O rótulo fica visível dentro do botão
+// para o usuário sempre saber qual eixo está filtrando.
+function FiltroSelect({ label, value, onChange, opcoes }) {
+  const ativo = value !== "";
+  return (
+    <label
+      className={[
+        "inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-500 transition-colors",
+        ativo
+          ? "border-jade-300 bg-jade-50 text-jade-700"
+          : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50",
+      ].join(" ")}
+    >
+      <span className="uppercase tracking-wide text-[0.65rem] text-slate-400">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        aria-label={`Filtrar por ${label}`}
+        className="cursor-pointer bg-transparent pr-1 text-xs font-500 focus:outline-none"
+      >
+        {opcoes.map((o) => (
+          <option key={o.valor} value={o.valor}>
+            {o.rotulo}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+// Cabeçalho clicável de coluna numérica. Mostra seta de direção quando ativo,
+// e um ícone neutro de ordenação quando inativo. Alinhado à direita (números).
+function ThOrdenavel({ rotulo, coluna, ordem, onOrdenar }) {
+  const ativo = ordem.coluna === coluna;
+  const asc = ativo && ordem.dir === "asc";
+  return (
+    <th className="px-4 py-3 text-right font-600">
+      <button
+        type="button"
+        onClick={() => onOrdenar(coluna)}
+        aria-label={`Ordenar por ${rotulo}`}
+        className={[
+          "inline-flex items-center gap-1 uppercase tracking-wider transition-colors",
+          ativo ? "text-ink-800" : "text-slate-500 hover:text-ink-700",
+        ].join(" ")}
+      >
+        {rotulo}
+        {ativo ? (
+          asc ? (
+            <ChevronUp className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5" />
+          )
+        ) : (
+          <ArrowUpDown className="h-3 w-3 opacity-50" />
+        )}
+      </button>
+    </th>
   );
 }
 
@@ -166,13 +356,46 @@ function dataCurta(iso) {
     : d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" });
 }
 
-function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando, onAbrir, onSalvar, onCancelar }) {
+// Data/hora pt-BR completa para a ficha de detalhe (DD/MM/AAAA HH:mm).
+function dataHoraLonga(iso) {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime())
+    ? "—"
+    : d.toLocaleString("pt-BR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+}
+
+function LinhaFornecedor({
+  f,
+  emEdicao,
+  expandido,
+  onToggleDetalhe,
+  cnpj,
+  razao,
+  setCnpj,
+  setRazao,
+  salvando,
+  onAbrir,
+  onSalvar,
+  onCancelar,
+}) {
   const cnd = statusCndMeta(f.status_cnd);
   // Status de CND consultado em análise anterior (registrado por CNPJ no banco).
   // Informativo: a CND é volátil e pode ser reconsultada; isto só mostra o que é recente.
   const cndCache = !cnd ? statusCndMeta(f.cnd_status_cache) : null;
   const risco = riscoMeta(f.risco_2027);
   const riscoAlto = f.risco_2027 === "ALTO";
+  // Tem ficha de CND para expandir quando há qualquer dado consultado (status
+  // atual, cache, ou motivo de falha registrado).
+  const temFicha = Boolean(
+    f.status_cnd || f.cnd_status_cache || f.cnd_falha_motivo || f.cnd_consulta_datahora
+  );
 
   // Em edição: a linha vira um painel de resolução de CNPJ ocupando a largura toda,
   // com a cascata grátis (busca no banco) → manual. Mantém o contexto do fornecedor.
@@ -197,113 +420,293 @@ function LinhaFornecedor({ f, emEdicao, cnpj, razao, setCnpj, setRazao, salvando
   }
 
   return (
-    <tr className={["relative transition-colors hover:bg-slate-50/70", riscoAlto ? "bg-signal-50/40" : ""].join(" ")}>
-      {/* Grupo */}
-      <td className="relative px-4 py-3 align-top">
-        {riscoAlto && <span className="absolute inset-y-0 left-0 w-1 bg-signal-600" aria-hidden="true" />}
-        <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-600 ${CORES_GRUPO[f.grupo] ?? CORES_GRUPO.INDEFINIDO}`}>
-          {f.grupo}
-        </span>
-      </td>
+    <>
+      <tr
+        className={[
+          "relative transition-colors hover:bg-slate-50/70",
+          riscoAlto ? "bg-signal-50/40" : "",
+          expandido ? "bg-slate-50/70" : "",
+        ].join(" ")}
+      >
+        {/* Grupo */}
+        <td className="relative px-4 py-3 align-top">
+          {riscoAlto && <span className="absolute inset-y-0 left-0 w-1 bg-signal-600" aria-hidden="true" />}
+          <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-600 ${CORES_GRUPO[f.grupo] ?? CORES_GRUPO.INDEFINIDO}`}>
+            {f.grupo}
+          </span>
+        </td>
 
-      {/* Fornecedor */}
-      <td className="px-4 py-3 align-top">
-        <div className="flex flex-col gap-1">
-          <span className="font-500 text-ink-800">{f.nome_forn}</span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {f.verificar_st && (
-              <Tooltip texto="Alíquota cheia cadastrada, mas o ICMS veio zerado nas notas deste fornecedor. Provável Substituição Tributária (o ICMS já foi recolhido antes na cadeia, então não gera crédito), ou erro de lançamento. Confira a nota de entrada: CFOP de ST (ex. 1403, 1411) e o campo ICMS ST. Se for ST, essas compras não dão crédito.">
-                <span className="inline-flex cursor-help items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-amber-700">
-                  <AlertTriangle className="h-3 w-3" /> Verificar ST
+        {/* Fornecedor */}
+        <td className="px-4 py-3 align-top">
+          <div className="flex flex-col gap-1">
+            <span className="font-500 text-ink-800">{f.nome_forn}</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {f.verificar_st && (
+                <Tooltip texto="Alíquota cheia cadastrada, mas o ICMS veio zerado nas notas deste fornecedor. Provável Substituição Tributária (o ICMS já foi recolhido antes na cadeia, então não gera crédito), ou erro de lançamento. Confira a nota de entrada: CFOP de ST (ex. 1403, 1411) e o campo ICMS ST. Se for ST, essas compras não dão crédito.">
+                  <span className="inline-flex cursor-help items-center gap-1 rounded border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-amber-700">
+                    <AlertTriangle className="h-3 w-3" /> Verificar ST
+                  </span>
+                </Tooltip>
+              )}
+              {f.tem_estorno && (
+                <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-slate-600">
+                  Estorno
                 </span>
-              </Tooltip>
-            )}
-            {f.tem_estorno && (
-              <span className="rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[0.65rem] font-500 text-slate-600">
-                Estorno
-              </span>
-            )}
-            {!f.cnpj_pendente && !f.cnpj_confirmado && f.cnpj && (
-              <span className="text-[0.65rem] text-slate-400">CNPJ não confirmado</span>
-            )}
+              )}
+              {!f.cnpj_pendente && !f.cnpj_confirmado && f.cnpj && (
+                <span className="text-[0.65rem] text-slate-400">CNPJ não confirmado</span>
+              )}
+            </div>
           </div>
-        </div>
-      </td>
+        </td>
 
-      {/* CNPJ */}
-      <td className="whitespace-nowrap px-4 py-3 align-top">
-        {f.cnpj ? (
-          <div className="flex flex-col items-start gap-1">
-            <span className={`tnum inline-flex items-center gap-1.5 whitespace-nowrap ${f.cnpj_confirmado ? "text-jade-700" : "text-slate-600"}`}>
-              {f.cnpj_confirmado && <ShieldCheck className="h-3.5 w-3.5 shrink-0" />}
-              {formatarCnpj(f.cnpj)}
-            </span>
-            {!f.cnpj_confirmado && (
+        {/* CNPJ */}
+        <td className="whitespace-nowrap px-4 py-3 align-top">
+          {f.cnpj ? (
+            <div className="flex flex-col items-start gap-1">
+              <span className={`tnum inline-flex items-center gap-1.5 whitespace-nowrap ${f.cnpj_confirmado ? "text-jade-700" : "text-slate-600"}`}>
+                {f.cnpj_confirmado && <ShieldCheck className="h-3.5 w-3.5 shrink-0" />}
+                {formatarCnpj(f.cnpj)}
+              </span>
+              {!f.cnpj_confirmado && (
+                <button
+                  type="button"
+                  onClick={onAbrir}
+                  className="inline-flex items-center gap-1 rounded-lg border border-dashed border-amber-300 px-2 py-0.5 text-[0.7rem] font-500 text-amber-700 hover:border-amber-400 hover:bg-amber-50"
+                >
+                  <Pencil className="h-3 w-3" /> revisar e confirmar
+                </button>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={onAbrir}
+              className="inline-flex items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2 py-1 text-xs font-500 text-jade-700 hover:border-jade-400 hover:bg-jade-50"
+            >
+              <Pencil className="h-3 w-3" /> resolver CNPJ
+            </button>
+          )}
+        </td>
+
+        {/* CND — chip + botão de detalhe expansível */}
+        <td className="px-4 py-3 align-top">
+          <div className="flex items-start gap-2">
+            <div className="flex flex-col gap-0.5">
+              {cnd ? (
+                <>
+                  <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 ${cnd.classe}`}>
+                    {cnd.rotulo}
+                  </span>
+                  {f.cnd_ultima_consulta && (
+                    <span className="text-[0.65rem] text-slate-400">em {dataCurta(f.cnd_ultima_consulta)}</span>
+                  )}
+                </>
+              ) : cndCache ? (
+                <>
+                  <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 opacity-70 ${cndCache.classe}`}>
+                    {cndCache.rotulo}
+                  </span>
+                  <span className="text-[0.65rem] text-slate-400">consultada em {dataCurta(f.cnd_ultima_consulta)}</span>
+                </>
+              ) : (
+                <span className="text-xs text-slate-300">—</span>
+              )}
+            </div>
+            {temFicha && (
               <button
                 type="button"
-                onClick={onAbrir}
-                className="inline-flex items-center gap-1 rounded-lg border border-dashed border-amber-300 px-2 py-0.5 text-[0.7rem] font-500 text-amber-700 hover:border-amber-400 hover:bg-amber-50"
+                onClick={onToggleDetalhe}
+                aria-expanded={expandido}
+                aria-label={expandido ? "Fechar detalhes da CND" : "Ver detalhes da CND"}
+                className={[
+                  "mt-0.5 inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[0.65rem] font-500 transition-colors",
+                  expandido
+                    ? "border-jade-300 bg-jade-50 text-jade-700"
+                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-ink-700",
+                ].join(" ")}
               >
-                <Pencil className="h-3 w-3" /> revisar e confirmar
+                <FileText className="h-3 w-3" />
+                detalhes
+                {expandido ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
               </button>
             )}
           </div>
-        ) : (
-          <button
-            type="button"
-            onClick={onAbrir}
-            className="inline-flex items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2 py-1 text-xs font-500 text-jade-700 hover:border-jade-400 hover:bg-jade-50"
-          >
-            <Pencil className="h-3 w-3" /> resolver CNPJ
-          </button>
-        )}
-      </td>
+        </td>
 
-      {/* CND */}
-      <td className="px-4 py-3 align-top">
-        {cnd ? (
-          <div className="flex flex-col gap-0.5">
+        {/* Risco 2027 */}
+        <td className="px-4 py-3 align-top">
+          {risco ? (
+            <span
+              className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-600 ${risco.classe}`}
+              title={f.motivo_risco ?? undefined}
+            >
+              {riscoAlto && <ShieldAlert className="h-3.5 w-3.5" />}
+              {risco.rotulo}
+            </span>
+          ) : (
+            <span className="text-xs text-slate-300">—</span>
+          )}
+        </td>
+
+        <td className="tnum px-4 py-3 text-right align-top text-ink-700">{moeda(f.total_compras)}</td>
+        <td className="tnum px-4 py-3 text-right align-top text-slate-600">{percentual(f.aliquota_max)}</td>
+        <td className="tnum px-4 py-3 text-right align-top font-500 text-ink-800">{moeda(f.total_valor_icms)}</td>
+      </tr>
+
+      {/* Ficha de detalhe da CND, ocupando a largura toda abaixo da linha. */}
+      {expandido && (
+        <tr className="bg-slate-50/60">
+          <td colSpan={8} className="px-4 pb-4 pt-1">
+            <FichaCnd f={f} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// Item rótulo/valor da ficha de CND. Layout em coluna, valor em destaque.
+function Campo({ rotulo, children }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-[0.65rem] font-500 uppercase tracking-wide text-slate-400">{rotulo}</dt>
+      <dd className="mt-0.5 break-words text-sm text-ink-800">{children}</dd>
+    </div>
+  );
+}
+
+// Chip sim/não para os débitos (Receita Federal e PGFN). Vermelho quando há
+// débito (true), jade quando não há (false), neutro quando indefinido (null).
+function ChipDebito({ rotulo, valor }) {
+  let classe = "border-slate-200 bg-slate-50 text-slate-500";
+  let texto = "Sem informação";
+  if (valor === true) {
+    classe = "border-signal-200 bg-signal-50 text-signal-700";
+    texto = "Com débito";
+  } else if (valor === false) {
+    classe = "border-jade-200 bg-jade-50 text-jade-700";
+    texto = "Sem débito";
+  }
+  return (
+    <div className={`rounded-lg border px-3 py-2 ${classe}`}>
+      <p className="text-[0.65rem] font-500 uppercase tracking-wide opacity-70">{rotulo}</p>
+      <p className="mt-0.5 text-sm font-600">{texto}</p>
+    </div>
+  );
+}
+
+// Ficha completa de regularidade fiscal (CND) de um fornecedor. Mostra todos os
+// campos do contrato do Lucas. Quando FALHA, destaca o motivo em âmbar e deixa
+// claro que falha de consulta não é sinônimo de débito.
+function FichaCnd({ f }) {
+  const cnd = statusCndMeta(f.status_cnd) ?? statusCndMeta(f.cnd_status_cache);
+  const ehFalha = f.status_cnd === "FALHA";
+  const validade = validadeCnd(f.cnd_validade);
+
+  return (
+    <div className="animate-fade-up rounded-xl border border-slate-200 bg-white p-4 shadow-panel">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+        <div className="flex items-center gap-2">
+          <FileText className="h-4 w-4 text-slate-500" />
+          <span className="text-sm font-600 text-ink-800">Certidão Negativa de Débitos</span>
+          {cnd && (
             <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 ${cnd.classe}`}>
               {cnd.rotulo}
             </span>
-            {f.cnd_ultima_consulta && (
-              <span className="text-[0.65rem] text-slate-400">em {dataCurta(f.cnd_ultima_consulta)}</span>
-            )}
-          </div>
-        ) : cndCache ? (
-          <div
-            className="flex flex-col gap-0.5"
-            title={`Última CND consultada em ${dataCurta(f.cnd_ultima_consulta)}. A CND é volátil; consulte de novo para o status atual.`}
+          )}
+        </div>
+        {f.cnd_comprovante_url && (
+          <a
+            href={f.cnd_comprovante_url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-jade-200 bg-jade-50 px-3 py-1.5 text-xs font-600 text-jade-700 transition-colors hover:bg-jade-100"
           >
-            <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 opacity-70 ${cndCache.classe}`}>
-              {cndCache.rotulo}
+            <ExternalLink className="h-3.5 w-3.5" /> Ver certidão (PDF)
+          </a>
+        )}
+      </div>
+
+      {/* Falha: destaca o motivo e esclarece que não significa débito. */}
+      {ehFalha && (
+        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+            <div>
+              <p className="text-sm font-600 text-amber-800">
+                Não foi possível consultar a CND
+              </p>
+              <p className="mt-1 text-xs leading-relaxed text-amber-700">
+                Motivo: {f.cnd_falha_motivo || "não informado pelo serviço de consulta."}
+              </p>
+              <p className="mt-1.5 flex items-center gap-1 text-xs leading-relaxed text-amber-700">
+                <RotateCcw className="h-3 w-3 shrink-0" />
+                Isto é uma falha na consulta, não significa que o fornecedor tem
+                débito. Você pode tentar consultar de novo.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Débitos lado a lado — o coração da regularidade. */}
+      {!ehFalha && (
+        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <ChipDebito rotulo="Receita Federal (RFB)" valor={f.cnd_debitos_rfb} />
+          <ChipDebito rotulo="Dívida Ativa (PGFN)" valor={f.cnd_debitos_pgfn} />
+        </div>
+      )}
+
+      {/* Demais dados da certidão. */}
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-3 lg:grid-cols-4">
+        {f.cnd_tipo && <Campo rotulo="Tipo da certidão">{f.cnd_tipo}</Campo>}
+
+        <Campo rotulo="Emissão">{dataHoraLonga(f.cnd_emissao_data)}</Campo>
+
+        <Campo rotulo="Validade">
+          {f.cnd_validade ? (
+            <span className="flex flex-col">
+              <span
+                className={
+                  validade.estado === "VENCIDA"
+                    ? "font-600 text-signal-700"
+                    : validade.estado === "PERTO"
+                    ? "font-600 text-amber-700"
+                    : "text-ink-800"
+                }
+              >
+                {dataHoraLonga(f.cnd_validade)}
+              </span>
+              {validade.estado === "VENCIDA" && (
+                <span className="text-[0.65rem] font-500 text-signal-600">Vencida</span>
+              )}
+              {validade.estado === "PERTO" && (
+                <span className="text-[0.65rem] font-500 text-amber-600">
+                  Vence em {validade.dias} {validade.dias === 1 ? "dia" : "dias"}
+                </span>
+              )}
             </span>
-            <span className="text-[0.65rem] text-slate-400">consultada em {dataCurta(f.cnd_ultima_consulta)}</span>
-          </div>
-        ) : (
-          <span className="text-xs text-slate-300">—</span>
-        )}
-      </td>
+          ) : (
+            "—"
+          )}
+        </Campo>
 
-      {/* Risco 2027 */}
-      <td className="px-4 py-3 align-top">
-        {risco ? (
-          <span
-            className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-600 ${risco.classe}`}
-            title={f.motivo_risco ?? undefined}
-          >
-            {riscoAlto && <ShieldAlert className="h-3.5 w-3.5" />}
-            {risco.rotulo}
-          </span>
-        ) : (
-          <span className="text-xs text-slate-300">—</span>
-        )}
-      </td>
+        <Campo rotulo="Consultada em">{dataHoraLonga(f.cnd_consulta_datahora || f.cnd_ultima_consulta)}</Campo>
 
-      <td className="tnum px-4 py-3 text-right align-top text-ink-700">{moeda(f.total_compras)}</td>
-      <td className="tnum px-4 py-3 text-right align-top text-slate-600">{percentual(f.aliquota_max)}</td>
-      <td className="tnum px-4 py-3 text-right align-top font-500 text-ink-800">{moeda(f.total_valor_icms)}</td>
-    </tr>
+        {f.cnd_certidao_codigo && (
+          <Campo rotulo="Código de controle">
+            <span className="tnum">{f.cnd_certidao_codigo}</span>
+          </Campo>
+        )}
+      </dl>
+
+      {f.cnd_descricao && (
+        <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
+          {f.cnd_descricao}
+        </p>
+      )}
+    </div>
   );
 }
 

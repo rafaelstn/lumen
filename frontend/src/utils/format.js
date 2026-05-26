@@ -79,6 +79,23 @@ export function statusCndMeta(status) {
   return STATUS_CND[status] ?? null;
 }
 
+// Situação da validade da CND a partir da data de validade (ISO ou Date).
+// Devolve { estado: "VIGENTE" | "PERTO" | "VENCIDA" | null, dias } onde dias é o
+// número de dias até vencer (negativo se já venceu). "PERTO" = vence em <= 15 dias.
+export function validadeCnd(validade) {
+  if (!validade) return { estado: null, dias: null };
+  const d = validade instanceof Date ? validade : new Date(validade);
+  if (Number.isNaN(d.getTime())) return { estado: null, dias: null };
+  const hoje = new Date();
+  hoje.setHours(0, 0, 0, 0);
+  const alvo = new Date(d);
+  alvo.setHours(0, 0, 0, 0);
+  const dias = Math.round((alvo - hoje) / 86400000);
+  if (dias < 0) return { estado: "VENCIDA", dias };
+  if (dias <= 15) return { estado: "PERTO", dias };
+  return { estado: "VIGENTE", dias };
+}
+
 // Metadados visuais por nível de risco 2027.
 export const RISCO_2027 = {
   ALTO: { rotulo: "Risco alto", classe: "bg-signal-600 text-white", chip: "bg-signal-50 text-signal-700 border-signal-200" },
