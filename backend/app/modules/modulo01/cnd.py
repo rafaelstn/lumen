@@ -178,6 +178,13 @@ async def consultar_cnd(cnpj: str, client: httpx.AsyncClient) -> dict:
 _tasks: set[asyncio.Task] = set()
 
 
+def _precisa_consultar(f: dict) -> bool:
+    """Alvo de CND: tem CNPJ e ainda não tem um RESULTADO VÁLIDO. Resultado válido
+    (negativa/positiva) é pulado para não regastar; FALHA é re-tentado (ex: a Receita
+    estava fora do ar, então a consulta anterior não conta como resultado)."""
+    return bool(f.get("cnpj")) and f.get("status_cnd") in (None, "", FALHA)
+
+
 def iniciar_consulta_job(job_id: str, limite: int) -> dict:
     """Inicia a consulta de CND em background. Idempotente: não dispara se já em andamento.
 
@@ -191,7 +198,7 @@ def iniciar_consulta_job(job_id: str, limite: int) -> dict:
             info["status"] = "ja_em_andamento"
             return
         fornecedores = job["fornecedores"]
-        com_cnpj = [f for f in fornecedores if f.get("cnpj") and not f.get("status_cnd")]
+        com_cnpj = [f for f in fornecedores if _precisa_consultar(f)]
         alvos = [(f["cod_forn"], f["cnpj"]) for f in com_cnpj[:limite]]
         total = len(alvos)
         info.update(status="iniciado", total=total, total_com_cnpj=len(com_cnpj), alvos=alvos)
