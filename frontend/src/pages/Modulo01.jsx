@@ -519,7 +519,10 @@ export default function Modulo01() {
       </div>
 
       {/* Alertas de risco (só com CND) */}
-      {cndConcluida && <AlertasRisco fornecedores={resultado.fornecedores} />}
+      {/* O painel se baseia nos dados (risco_2027, que persistem no histórico), não no estado
+          efêmero da consulta: assim continua aparecendo após recarregar. Ele mesmo se oculta
+          quando não há fornecedor em risco alto. */}
+      <AlertasRisco fornecedores={resultado.fornecedores} />
 
       <PainelCnpj
         pendentes={r.cnpj_pendentes}
