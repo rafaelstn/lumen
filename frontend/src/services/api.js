@@ -110,6 +110,38 @@ export async function getAdminEscritorioDetalhe(id) {
   return data;
 }
 
+// Cadastra um escritório novo já com o usuário dono. 201 com
+// { id, nome, criado_em, dono_usuario_id, dono_email, dono_role }.
+// 409 e-mail já em uso; 422 payload inválido (ex.: senha < 8).
+export async function criarEscritorio({ nome, email, senha }) {
+  const { data } = await api.post("/admin/escritorios", { nome, email, senha });
+  return data;
+}
+
+// Remove um escritório e tudo que depende dele (usuários, análises, histórico).
+// O cadastro global de CNPJ é preservado pelo backend. 200 com
+// { id, status: "removido", removidos: {...} }. 400 quando é o escritório
+// default ou contém admin (proteção); 404 quando não existe.
+export async function deletarEscritorio(id) {
+  const { data } = await api.delete(`/admin/escritorio/${id}`);
+  return data;
+}
+
+// Lista paginada de empresas/fornecedores do cadastro global (admin vê todos).
+// { total, offset, limit, resultados: [...] }. Não consome créditos.
+export async function listarFornecedoresAdmin({ offset = 0, limit = 50, q = "" } = {}) {
+  const params = { offset, limit };
+  if (q) params.q = q;
+  const { data } = await api.get("/modulo01/fornecedores", { params });
+  return data;
+}
+
+// Detalhe completo de um fornecedor do cadastro global, com sócios (admin).
+export async function detalheFornecedor(cnpj) {
+  const { data } = await api.get(`/modulo01/fornecedor/${cnpj}`);
+  return data;
+}
+
 export async function getModulo01Status() {
   const { data } = await api.get("/modulo01/status");
   return data;

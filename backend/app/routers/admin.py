@@ -12,14 +12,19 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.auth import service as auth_service
 from app.auth.deps import Contexto, somente_admin
 from app.auth.schemas import (
     ConsumoEscritorioOut,
+    CriarEscritorioIn,
+    EscritorioCriadoOut,
     EscritorioDetalheOut,
     EscritorioMetricasOut,
+    EscritorioRemovidoOut,
     ResumoAdminOut,
 )
 from app.database import async_session_factory
+from app.models.escritorio import Escritorio
 from app.modules.consumo import admin_repo
 from app.modules.consumo import service as consumo_service
 
@@ -99,3 +104,54 @@ async def detalhe_escritorio(escritorio_id: str, ctx: Contexto = Depends(somente
     if dados is None:
         raise HTTPException(status_code=404, detail="Escritório não encontrado.")
     return EscritorioDetalheOut(**dados)
+
+
+@router.post("/escritorios", response_model=EscritorioCriadoOut, status_code=201)
+async def criar_escritorio(body: CriarEscritorioIn, ctx: Contexto = Depends(somente_admin)):
+    """Admin cadastra um escritório novo + usuário dono (role='escritorio').
+
+    Reusa a lógica atômica do signup (escritório + usuário juntos, senha bcrypt, e-mail único).
+    409 se o e-mail já existe; 422 (Pydantic na borda) se o payload é inválido. Só admin.
+    """
+    try:
+        async with async_session_factory() as session:
+            usuario = await auth_service.criar_escritorio_admin(
+                session, body.nome, body.email, body.senha
+            )
+            escritorio = await session.get(Escritorio, usuario.escritorio_id)
+    except auth_service.EmailJaCadastrado:
+        raise HTTPException(status_code=409, detail="E-mail já cadastrado.")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Indisponível no momento.")
+    return EscritorioCriadoOut(
+        id=usuario.escritorio_id,
+        nome=escritorio.nome if escritorio else "",
+        criado_em=escritorio.criado_em.isoformat() if escritorio and escritorio.criado_em else None,
+        dono_usuario_id=usuario.id,
+        dono_email=usuario.email,
+        dono_role=usuario.role,
+    )
+
+
+@router.delete("/escritorio/{escritorio_id}", response_model=EscritorioRemovidoOut)
+async def deletar_escritorio(escritorio_id: str, ctx: Contexto = Depends(somente_admin)):
+    """Admin remove um escritório e seus dados de tenant (cascata atômica).
+
+    Apaga usuários, análises, associações de fornecedor, tentativas de enriquecimento,
+    logs de consumo e o M02 (monitorados/alertas/histórico). NÃO apaga o cache global
+    de fornecedores. Protegido: 400 se for o default ou contiver um admin; 404 se não existe.
+    """
+    try:
+        async with async_session_factory() as session:
+            removidos = await auth_service.deletar_escritorio(session, escritorio_id)
+    except auth_service.EscritorioInexistente:
+        raise HTTPException(status_code=404, detail="Escritório não encontrado.")
+    except auth_service.RemocaoProibida as exc:
+        raise HTTPException(status_code=400, detail=exc.motivo)
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=503, detail="Indisponível no momento.")
+    return EscritorioRemovidoOut(id=escritorio_id, status="removido", removidos=removidos)

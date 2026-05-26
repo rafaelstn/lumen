@@ -43,6 +43,33 @@ class EscritorioOut(BaseModel):
     criado_em: str | None = None
 
 
+class CriarEscritorioIn(BaseModel):
+    """Admin cria um escritório + usuário dono. Validação na borda; senha >= mínimo."""
+
+    nome: str = Field(min_length=2, max_length=255)
+    email: EmailStr
+    senha: str = Field(min_length=settings.senha_min_len, max_length=128)
+
+
+class EscritorioCriadoOut(BaseModel):
+    """Resposta da criação admin: dados do escritório + e-mail do dono. SEM senha_hash."""
+
+    id: str
+    nome: str
+    criado_em: str | None = None
+    dono_usuario_id: str
+    dono_email: EmailStr
+    dono_role: str
+
+
+class EscritorioRemovidoOut(BaseModel):
+    """Resposta da remoção: id, status e as contagens do que foi apagado por tabela."""
+
+    id: str
+    status: str = "removido"
+    removidos: dict[str, int] = {}
+
+
 # --- Dashboard admin (visão sistêmica) ---------------------------------------------
 # Dinheiro SEMPRE em centavos inteiros. Nenhum dado pessoal (sócios) entra aqui.
 
