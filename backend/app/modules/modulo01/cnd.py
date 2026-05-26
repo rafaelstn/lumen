@@ -361,3 +361,82 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
 
     # Mantém o histórico em sincronia com o estado pós-CND/risco.
     await _sincronizar_historico(job_id)
+
+
+async def consultar_cnd_fornecedor(job_id: str, cod_forn: str) -> dict | None:
+    """Re-consulta a CND de UM fornecedor, sob demanda (botão na ficha). Síncrono: é uma única
+    consulta, então não usa background/progresso. Atualiza o fornecedor no store, recalcula o
+    risco 2027, contabiliza o custo (se cobrada) e sincroniza o histórico. Devolve o fornecedor
+    atualizado, ou None se o job/fornecedor não existir (ou não tiver CNPJ). Nunca lança.
+    """
+    from app.modules.modulo01 import risk
+
+    job = store.obter(job_id)
+    if job is None:
+        return None
+    alvo = next((f for f in job["fornecedores"] if f.get("cod_forn") == cod_forn), None)
+    if alvo is None or not alvo.get("cnpj"):
+        return None
+
+    cnpj = alvo["cnpj"]
+    if not budget.consumir("cnd"):
+        r = {
+            "status": FALHA, "descricao": "Teto diário de consultas atingido.",
+            "cnd_falha_motivo": "Teto diário de consultas atingido.", "cobrada": False,
+        }
+    else:
+        async with httpx.AsyncClient() as client:
+            r = await consultar_cnd(cnpj, client)
+
+    cap: dict = {}
+
+    def aplicar(job: dict) -> None:
+        for f in job["fornecedores"]:
+            if f["cod_forn"] == cod_forn:
+                f["status_cnd"] = r["status"]
+                f["cnd_descricao"] = r.get("descricao")
+                f["cnd_tipo"] = r.get("cnd_tipo")
+                f["cnd_certidao_codigo"] = r.get("certidao_codigo")
+                f["cnd_emissao_data"] = r.get("cnd_emissao_data")
+                f["cnd_validade"] = r.get("validade_data")
+                f["cnd_consulta_datahora"] = r.get("cnd_consulta_datahora")
+                f["cnd_debitos_rfb"] = r.get("cnd_debitos_rfb")
+                f["cnd_debitos_pgfn"] = r.get("cnd_debitos_pgfn")
+                f["cnd_comprovante_url"] = r.get("cnd_comprovante_url")
+                f["cnd_falha_motivo"] = r.get("cnd_falha_motivo")
+                f["cnd_origem_fora"] = bool(r.get("origem_fora"))
+                cap["razao_social"] = f.get("nome_forn")
+                break
+        # Recalcula o risco com o novo status (a engine opera na lista inteira, sem efeito colateral).
+        risk.aplicar_risco(job["fornecedores"])
+
+    if not store.mutar(job_id, aplicar):
+        return None
+
+    # Metadado por CNPJ (só status real; FALHA não atualiza a data). Tolerante a banco fora.
+    if r["status"] != FALHA:
+        try:
+            async with async_session_factory() as session:
+                await fornecedores_repo.registrar_cnd(
+                    session, cnpj, r["status"], razao_social=cap.get("razao_social")
+                )
+        except Exception:
+            logger.warning("CND (individual): falha ao registrar metadado por CNPJ.", exc_info=True)
+
+    # Audit trail: só registra se a Infosimples faturou esta consulta (billable).
+    if r.get("cobrada"):
+        from app.modules.consumo import repo as consumo_repo
+
+        job_atual = store.obter(job_id) or {}
+        escritorio_id = job_atual.get("escritorio_id") or settings.escritorio_default_id
+        try:
+            await consumo_repo.registrar_cnd(
+                escritorio_id=escritorio_id, modulo="modulo01",
+                operacao="cnd_individual", consultas_cobradas=1, contexto=f"job {job_id[:8]}",
+            )
+        except Exception:
+            logger.warning("CND (individual): falha ao registrar consumo.", exc_info=True)
+
+    await _sincronizar_historico(job_id)
+    job_final = store.obter(job_id) or {}
+    return next((f for f in job_final["fornecedores"] if f["cod_forn"] == cod_forn), None)

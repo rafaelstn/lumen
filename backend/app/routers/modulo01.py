@@ -340,6 +340,32 @@ async def consultar_cnd_endpoint(
     }
 
 
+@router.post("/consultar-cnd-fornecedor/{job_id}/{cod_forn}")
+@limiter.limit("12/minute")
+async def consultar_cnd_fornecedor_endpoint(
+    request: Request, job_id: str, cod_forn: str,
+    ctx: Contexto = Depends(contexto_atual),
+):
+    """Re-consulta a CND de UM fornecedor (botão 'tentar de novo' na ficha). Devolve o
+    fornecedor atualizado. Síncrono: é só uma consulta."""
+    if not settings.infosimples_token:
+        raise HTTPException(
+            status_code=400,
+            detail="Consulta de regularidade (CND) temporariamente indisponível. Tente novamente mais tarde.",
+        )
+    job = store.obter(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="Job não encontrado ou expirado.")
+    _checar_posse_job(job, ctx)
+    if budget.restante("cnd") <= 0:
+        raise HTTPException(status_code=429, detail="Teto diário de consultas de CND atingido.")
+
+    fornecedor = await cnd.consultar_cnd_fornecedor(job_id, cod_forn)
+    if fornecedor is None:
+        raise HTTPException(status_code=404, detail="Fornecedor não encontrado ou sem CNPJ para consultar.")
+    return {"job_id": job_id, "fornecedor": fornecedor}
+
+
 @router.get("/resultado/{job_id}", response_model=ProcessarResponse)
 async def resultado_job(job_id: str, ctx: Contexto = Depends(contexto_atual)):
     """Devolve o estado atual do job (fornecedores atualizados após CNPJ/CND)."""

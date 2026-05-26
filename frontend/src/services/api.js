@@ -229,6 +229,15 @@ export async function consultarResultado(jobId) {
   return data;
 }
 
+// Re-consulta a CND de um único fornecedor (botão "tentar de novo" na ficha).
+// Síncrono: devolve { job_id, fornecedor } com o fornecedor já atualizado.
+export async function consultarCndFornecedor(jobId, codForn) {
+  const { data } = await api.post(
+    `/modulo01/consultar-cnd-fornecedor/${jobId}/${encodeURIComponent(codForn)}`
+  );
+  return data;
+}
+
 // ---- HISTÓRICO DE ANÁLISES — reabrir sem re-subir ----------------------
 // Análises já processadas, mais recente primeiro. Não consome créditos.
 // { analises: [{ id, cliente, cnpj_cliente, periodo, total_fornecedores,

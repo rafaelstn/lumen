@@ -91,3 +91,28 @@ async def test_cobradas_conta_billable_inclusive_falha(monkeypatch):
     assert prog["falhas"] == 2
     assert prog["cobradas"] == 2  # 1 sucesso + 1 falha-611; a falha não faturada não conta
     store.remover(job_id)
+
+
+async def test_consultar_cnd_fornecedor_individual(monkeypatch):
+    # Re-consulta de UM fornecedor: atualiza o status, recalcula o risco e devolve o fornecedor.
+    async def _fake_cnd(cnpj, client):
+        return {"status": cnd.POSITIVA, "origem_fora": False, "cobrada": True, "descricao": ""}
+
+    monkeypatch.setattr(cnd, "consultar_cnd", _fake_cnd)
+
+    job_id = _job_com([
+        {"cod_forn": "0001", "cnpj": "11111111111111", "nome_forn": "A", "grupo": "A",
+         "total_compras": "1000", "aliquota_max": "18", "status_cnd": "FALHA"},
+    ])
+    forn = await cnd.consultar_cnd_fornecedor(job_id, "0001")
+    assert forn is not None
+    assert forn["status_cnd"] == cnd.POSITIVA
+    assert forn["risco_2027"] == "ALTO"  # Grupo A + débito ativo = risco alto
+    store.remover(job_id)
+
+
+async def test_consultar_cnd_fornecedor_sem_cnpj_retorna_none():
+    job_id = _job_com([{"cod_forn": "0001", "cnpj": "", "nome_forn": "A"}])
+    forn = await cnd.consultar_cnd_fornecedor(job_id, "0001")
+    assert forn is None
+    store.remover(job_id)

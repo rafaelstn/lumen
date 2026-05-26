@@ -27,6 +27,7 @@ import {
   consultarProgresso,
   consultarProgressoEnriquecimento,
   consultarResultado,
+  consultarCndFornecedor,
   abrirAnalise,
   urlRelatorio,
 } from "../services/api.js";
@@ -154,6 +155,20 @@ export default function Modulo01() {
       recarregarResultado(resultado.job_id);
     },
     onError: (e) => setErroCnpj(e?.response?.data?.detail ?? "Não foi possível salvar o CNPJ."),
+  });
+
+  // Re-consulta a CND de UM fornecedor (botão na ficha). Atualiza só aquele fornecedor no estado;
+  // reconsultarCnd.variables guarda o cod_forn em andamento (para o loading da linha certa).
+  const reconsultarCnd = useMutation({
+    mutationFn: (codForn) => consultarCndFornecedor(resultado.job_id, codForn),
+    onSuccess: ({ fornecedor }) => {
+      setResultado((r) => ({
+        ...r,
+        fornecedores: r.fornecedores.map((f) =>
+          f.cod_forn === fornecedor.cod_forn ? fornecedor : f
+        ),
+      }));
+    },
   });
 
   const enriquecer = useMutation({
@@ -598,6 +613,8 @@ export default function Modulo01() {
         fornecedores={resultado.fornecedores}
         onSalvarCnpj={(codForn, dados) => salvarCnpj.mutate({ codForn, ...dados })}
         salvando={salvarCnpj.isPending}
+        onReconsultarCnd={(codForn) => reconsultarCnd.mutate(codForn)}
+        reconsultandoId={reconsultarCnd.isPending ? reconsultarCnd.variables : null}
       />
 
       {/* Ações finais */}

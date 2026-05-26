@@ -72,7 +72,7 @@ const TAMANHO_PADRAO = 20;
 // vermelha à esquerda; CNPJ pendente abre edição inline (razão social + CNPJ,
 // o backend valida o dígito verificador). Busca, filtros (grupo/CND/risco) e
 // ordenação por coluna são combináveis e rodam client-side.
-export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando }) {
+export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando, onReconsultarCnd, reconsultandoId }) {
   const [editando, setEditando] = useState(null);
   const [cnpj, setCnpj] = useState("");
   const [razao, setRazao] = useState("");
@@ -281,6 +281,8 @@ export default function FornecedoresTable({ fornecedores, onSalvarCnpj, salvando
                 salvando={salvando}
                 onAbrir={() => abrir(f)}
                 onSalvar={() => salvar(f)}
+                onReconsultar={onReconsultarCnd ? () => onReconsultarCnd(f.cod_forn) : undefined}
+                reconsultando={reconsultandoId === f.cod_forn}
                 onCancelar={() => setEditando(null)}
               />
             ))}
@@ -498,6 +500,8 @@ function LinhaFornecedor({
   onAbrir,
   onSalvar,
   onCancelar,
+  onReconsultar,
+  reconsultando,
 }) {
   const cnd = statusCndMeta(f.status_cnd);
   // Status de CND consultado em análise anterior (registrado por CNPJ no banco).
@@ -664,7 +668,12 @@ function LinhaFornecedor({
       {expandido && (
         <tr className="bg-slate-50/60">
           <td colSpan={8} className="px-4 pb-4 pt-1">
-            <FichaCnd f={f} />
+            <FichaCnd
+              f={f}
+              onReconsultar={onReconsultar}
+              onResolverCnpj={onAbrir}
+              reconsultando={reconsultando}
+            />
           </td>
         </tr>
       )}
@@ -705,7 +714,7 @@ function ChipDebito({ rotulo, valor }) {
 // Ficha completa de regularidade fiscal (CND) de um fornecedor. Mostra todos os
 // campos do contrato do Lucas. Quando FALHA, destaca o motivo em âmbar e deixa
 // claro que falha de consulta não é sinônimo de débito.
-function FichaCnd({ f }) {
+function FichaCnd({ f, onReconsultar, onResolverCnpj, reconsultando }) {
   const cnd = statusCndMeta(f.status_cnd) ?? statusCndMeta(f.cnd_status_cache);
   const ehFalha = f.status_cnd === "FALHA";
   const validade = validadeCnd(f.cnd_validade);
@@ -825,6 +834,32 @@ function FichaCnd({ f }) {
         <p className="mt-4 rounded-lg bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
           {f.cnd_descricao}
         </p>
+      )}
+
+      {/* Ações sob demanda: re-consultar a CND deste fornecedor e corrigir o CNPJ manualmente. */}
+      {(onReconsultar || onResolverCnpj) && (
+        <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-3">
+          {onReconsultar && f.cnpj && (
+            <button
+              type="button"
+              onClick={onReconsultar}
+              disabled={reconsultando}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-jade-200 bg-jade-50 px-3 py-1.5 text-xs font-600 text-jade-700 transition-colors hover:bg-jade-100 disabled:opacity-60"
+            >
+              {reconsultando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="h-3.5 w-3.5" />}
+              {reconsultando ? "Consultando..." : "Tentar puxar a CND de novo"}
+            </button>
+          )}
+          {onResolverCnpj && (
+            <button
+              type="button"
+              onClick={onResolverCnpj}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-600 text-slate-600 transition-colors hover:border-slate-300 hover:text-ink-700"
+            >
+              <Pencil className="h-3.5 w-3.5" /> {f.cnpj ? "Corrigir CNPJ manualmente" : "Definir CNPJ manualmente"}
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
