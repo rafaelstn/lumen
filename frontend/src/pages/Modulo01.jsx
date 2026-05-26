@@ -15,6 +15,7 @@ import {
   Sparkles,
   EyeOff,
   History,
+  ServerCrash,
 } from "lucide-react";
 import {
   processarArquivos,
@@ -589,6 +590,17 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
             falhas={progresso?.falhas}
             ativo
           />
+        ) : confirmando ? (
+          // Confirmação tem prioridade sobre o estado concluído: permite re-disparar
+          // a CND (re-tenta as que falharam) quando a Receita volta ao ar.
+          <ConfirmacaoCusto
+            quantidade={qtdComCnpj}
+            custoUnitarioCent={custoCndCent}
+            descricao="Consulta de CND"
+            processando={disparando}
+            onConfirmar={confirmar}
+            onCancelar={() => setConfirmando(false)}
+          />
         ) : cndConcluida ? (
           <div className="space-y-3">
             <ProgressBar
@@ -599,19 +611,26 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
               ativo={false}
               label="Consulta concluída"
             />
+            {(progresso?.origem_indisponivel ?? 0) > 0 && (
+              <div className="space-y-3">
+                <AvisoReceitaForaDoAr quantidade={progresso.origem_indisponivel} />
+                <div className="flex justify-center">
+                  <button
+                    type="button"
+                    onClick={() => setConfirmando(true)}
+                    disabled={disparando || !qtdComCnpj}
+                    className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-sm font-600 text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
+                  >
+                    {disparando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                    {disparando ? "Iniciando..." : "Consultar regularidade de novo"}
+                  </button>
+                </div>
+              </div>
+            )}
             <p className="text-xs text-slate-500">
               Resultados de CND e risco aplicados à análise. O detalhamento completo por fornecedor consta no relatório PDF.
             </p>
           </div>
-        ) : confirmando ? (
-          <ConfirmacaoCusto
-            quantidade={qtdComCnpj}
-            custoUnitarioCent={custoCndCent}
-            descricao="Consulta de CND"
-            processando={disparando}
-            onConfirmar={confirmar}
-            onCancelar={() => setConfirmando(false)}
-          />
         ) : (
           <div className="text-center">
             <p className="text-sm text-slate-500">
@@ -637,6 +656,29 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
         )}
       </div>
     </section>
+  );
+}
+
+// Origem oficial (Receita Federal/PGFN) fora do ar: parte das CND falhou por
+// causa da fonte, não por defeito do sistema. Distinto de erro do sistema:
+// basta re-tentar em alguns minutos clicando em "Consultar regularidade" de
+// novo, que o backend refaz só as que falharam.
+function AvisoReceitaForaDoAr({ quantidade, className = "" }) {
+  return (
+    <div
+      className={`flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-700 ${className}`}
+      role="status"
+    >
+      <ServerCrash className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>
+        A Receita Federal/PGFN está temporariamente fora do ar.{" "}
+        <strong>
+          {quantidade} consulta{quantidade > 1 ? "s" : ""}
+        </strong>{" "}
+        falhou por isso, não por defeito do sistema. Em alguns minutos, clique em{" "}
+        <strong>Consultar regularidade</strong> de novo para re-tentar apenas as que falharam.
+      </span>
+    </div>
   );
 }
 

@@ -717,6 +717,14 @@ function FichaCnd({ f }) {
   const cnd = statusCndMeta(f.status_cnd) ?? statusCndMeta(f.cnd_status_cache);
   const ehFalha = f.status_cnd === "FALHA";
   const validade = validadeCnd(f.cnd_validade);
+  // Reforço visual: quando o motivo da falha indica que a fonte oficial está
+  // fora do ar (Receita Federal/PGFN), deixa explícito que é indisponibilidade
+  // da origem, não defeito do sistema nem débito do fornecedor.
+  const origemFora =
+    ehFalha &&
+    /receita|pgfn|fora do ar|indispon|inst[áa]vel|timeout|tempo esgotado|502|503|504/i.test(
+      f.cnd_falha_motivo || "",
+    );
 
   return (
     <div className="animate-fade-up rounded-xl border border-slate-200 bg-white p-4 shadow-panel">
@@ -749,15 +757,18 @@ function FichaCnd({ f }) {
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
             <div>
               <p className="text-sm font-600 text-amber-800">
-                Não foi possível consultar a CND
+                {origemFora
+                  ? "A Receita Federal/PGFN está fora do ar"
+                  : "Não foi possível consultar a CND"}
               </p>
               <p className="mt-1 text-xs leading-relaxed text-amber-700">
                 Motivo: {f.cnd_falha_motivo || "não informado pelo serviço de consulta."}
               </p>
               <p className="mt-1.5 flex items-center gap-1 text-xs leading-relaxed text-amber-700">
                 <RotateCcw className="h-3 w-3 shrink-0" />
-                Isto é uma falha na consulta, não significa que o fornecedor tem
-                débito. Você pode tentar consultar de novo.
+                {origemFora
+                  ? "É a fonte oficial fora do ar, não defeito do sistema nem débito do fornecedor. Tente consultar de novo em alguns minutos."
+                  : "Isto é uma falha na consulta, não significa que o fornecedor tem débito. Você pode tentar consultar de novo."}
               </p>
             </div>
           </div>

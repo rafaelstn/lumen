@@ -17,6 +17,7 @@ import {
   Calculator,
   HelpCircle,
   CheckCircle2,
+  ServerCrash,
 } from "lucide-react";
 import {
   dueDiligence,
@@ -111,6 +112,9 @@ function Cabecalho() {
 function DueDiligence() {
   const [texto, setTexto] = useState("");
   const [confirmando, setConfirmando] = useState(false);
+  // Inclui a consulta de CND por padrão (score completo). Desmarcado: avaliação
+  // mais barata e que não depende da Receita estar no ar, com score parcial.
+  const [incluirCnd, setIncluirCnd] = useState(true);
   const custos = useCustosEfetivos();
 
   const avaliar = useMutation({
@@ -126,10 +130,13 @@ function DueDiligence() {
 
   // Orçamento da fila atual com os custos unitários configurados.
   const orc = orcamento(cnpjs.length, custos.cadastroCent, custos.cndCent);
+  // Custo efetivo conforme a escolha de incluir ou não a CND.
+  const unitarioCent = incluirCnd ? orc.unitarioComCndCent : orc.unitarioSemCndCent;
+  const totalCent = incluirCnd ? orc.totalComCndCent : orc.totalSemCndCent;
 
   function confirmar() {
     if (cnpjs.length === 0) return;
-    avaliar.mutate(cnpjs);
+    avaliar.mutate({ cnpjs, incluirCnd });
   }
 
   return (
@@ -158,6 +165,30 @@ function DueDiligence() {
           className="mt-2 w-full resize-y rounded-xl border border-slate-300 bg-white p-3.5 font-mono text-sm tnum text-ink-900 placeholder:text-slate-400 transition-colors focus:border-jade-500"
         />
 
+        {/* Escolha: incluir ou não a consulta de CND na avaliação */}
+        <label
+          htmlFor="incluir-cnd"
+          className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3.5"
+        >
+          <input
+            id="incluir-cnd"
+            type="checkbox"
+            checked={incluirCnd}
+            onChange={(e) => setIncluirCnd(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-slate-300 text-jade-600 focus:ring-jade-500"
+          />
+          <span className="text-sm">
+            <span className="font-500 text-ink-800">
+              Incluir consulta de CND (regularidade fiscal)
+            </span>
+            <span className="mt-0.5 block text-xs text-slate-500">
+              {incluirCnd
+                ? "Score completo, considerando a regularidade fiscal. Consulta a Receita Federal/PGFN, custa mais e depende da fonte estar no ar."
+                : "Avaliação mais barata e que não depende da Receita Federal/PGFN. O score sai parcial, sem o componente de regularidade fiscal."}
+            </span>
+          </span>
+        </label>
+
         {/* Custo por pesquisa, sempre visível */}
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 text-sm">
           <span className="inline-flex items-center gap-1.5 font-500 text-ink-800">
@@ -165,10 +196,14 @@ function DueDiligence() {
             Custo por fornecedor:
           </span>
           <span className="text-ink-900">
-            <strong className="tnum">{moeda(orc.unitarioComCndCent / 100)}</strong> com CND
+            <strong className="tnum">{moeda(unitarioCent / 100)}</strong>{" "}
+            {incluirCnd ? "com CND" : "sem CND"}
           </span>
           <span className="text-slate-500">
-            <span className="tnum">{moeda(orc.unitarioSemCndCent / 100)}</span> sem CND
+            <span className="tnum">
+              {moeda((incluirCnd ? orc.unitarioSemCndCent : orc.unitarioComCndCent) / 100)}
+            </span>{" "}
+            {incluirCnd ? "sem CND" : "com CND"}
           </span>
           {custos.cadastroCent === 0 && (
             <span className="text-xs text-amber-600">
@@ -190,11 +225,20 @@ function DueDiligence() {
               <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-jade-600" />
               <span>
                 Você vai avaliar <strong>{orc.quantidade}</strong> fornecedor
-                {orc.quantidade > 1 ? "es" : ""} com consulta de CND. Custo estimado:{" "}
-                <strong className="tnum">{moeda(orc.totalComCndCent / 100)}</strong> (
-                {moeda(orc.totalSemCndCent / 100)} sem CND). Confirmar?
+                {orc.quantidade > 1 ? "es" : ""}{" "}
+                <strong>{incluirCnd ? "com consulta de CND" : "sem consulta de CND"}</strong>. Custo
+                estimado: <strong className="tnum">{moeda(totalCent / 100)}</strong>. Confirmar?
               </span>
             </p>
+            {!incluirCnd && (
+              <p className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2.5 text-xs text-amber-700">
+                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  Sem a CND, o score sai <strong>parcial</strong>: não inclui o componente de
+                  regularidade fiscal.
+                </span>
+              </p>
+            )}
             <div className="mt-3.5 flex flex-wrap gap-2.5">
               <button
                 type="button"
@@ -233,7 +277,8 @@ function DueDiligence() {
             {cnpjs.length > 0 && !avaliar.isPending && (
               <span className="text-sm text-slate-500">
                 {cnpjs.length} CNPJ{cnpjs.length > 1 ? "s" : ""} na fila ·{" "}
-                <span className="tnum text-ink-700">{moeda(orc.totalComCndCent / 100)}</span> com CND
+                <span className="tnum text-ink-700">{moeda(totalCent / 100)}</span>{" "}
+                {incluirCnd ? "com CND" : "sem CND"}
               </span>
             )}
           </div>
@@ -250,6 +295,8 @@ function DueDiligence() {
           avaliados={resposta.avaliados}
           tetoAtingido={resposta.teto_atingido}
           limiteTaxa={resposta.limite_taxa_atingido}
+          incluiuCnd={resposta.incluiu_cnd}
+          origemIndisponivel={resposta.origem_indisponivel}
         />
       )}
     </div>
@@ -436,7 +483,14 @@ function ResultadoOrcamento({ rotulo, descricao, totalCent, destaque }) {
   );
 }
 
-function RankingDueDiligence({ resultados, avaliados, tetoAtingido, limiteTaxa }) {
+function RankingDueDiligence({
+  resultados,
+  avaliados,
+  tetoAtingido,
+  limiteTaxa,
+  incluiuCnd,
+  origemIndisponivel,
+}) {
   if (resultados.length === 0) {
     return (
       <EstadoVazio
@@ -446,6 +500,9 @@ function RankingDueDiligence({ resultados, avaliados, tetoAtingido, limiteTaxa }
       />
     );
   }
+
+  // incluiu_cnd vem false quando a avaliação foi feita sem CND (score parcial).
+  const semCnd = incluiuCnd === false;
 
   return (
     <section className="space-y-4">
@@ -459,20 +516,36 @@ function RankingDueDiligence({ resultados, avaliados, tetoAtingido, limiteTaxa }
 
       {tetoAtingido && <AvisoTeto />}
       {limiteTaxa && <AvisoLimiteTaxa />}
+      {origemIndisponivel > 0 && <AvisoReceitaForaDoAr quantidade={origemIndisponivel} />}
+      {semCnd && (
+        <div
+          className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-700"
+          role="status"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Avaliação feita <strong>sem a consulta de CND</strong>. Os scores são parciais: não
+            incluem o componente de regularidade fiscal.
+          </span>
+        </div>
+      )}
 
       <div className="grid gap-4">
         {resultados.map((f, i) => (
-          <CardFornecedor key={`${f.cnpj}-${i}`} f={f} />
+          <CardFornecedor key={`${f.cnpj}-${i}`} f={f} semCnd={semCnd} />
         ))}
       </div>
     </section>
   );
 }
 
-function CardFornecedor({ f }) {
+function CardFornecedor({ f, semCnd = false }) {
   const faixa = faixaMeta(f.faixa, f.score);
   const cnd = statusCndMeta(f.status_cnd);
   const componentes = f.componentes ?? {};
+  // Score parcial quando não houve CND para este fornecedor (avaliação sem CND
+  // ou item cujo status_cnd voltou nulo, ex.: origem fora do ar).
+  const scoreParcial = semCnd || f.status_cnd == null;
 
   return (
     <article className="overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-panel transition-shadow hover:shadow-lift">
@@ -495,11 +568,23 @@ function CardFornecedor({ f }) {
           <p className="mt-0.5 font-mono tnum text-sm text-slate-500">{formatarCnpj(f.cnpj)}</p>
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
+            {scoreParcial && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-500 text-amber-700">
+                <AlertCircle className="h-3 w-3" />
+                Score parcial (sem CND)
+              </span>
+            )}
             {cnd && (
               <span
                 className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-500 ${cnd.classe}`}
               >
                 CND: {cnd.rotulo}
+              </span>
+            )}
+            {f.origem_fora && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-500 text-amber-700">
+                <ServerCrash className="h-3 w-3" />
+                Receita fora do ar
               </span>
             )}
             {f.situacao_cadastral && (
@@ -850,6 +935,33 @@ function AvisoLimiteTaxa({ className = "" }) {
       <span>
         Muitas consultas em pouco tempo. Aguarde cerca de 1 minuto e avalie o restante de novo.
         Seu saldo de créditos não acabou.
+      </span>
+    </div>
+  );
+}
+
+// Origem oficial (Receita Federal/PGFN) fora do ar: a CND falhou por causa da
+// fonte, não por defeito do sistema. As consultas afetadas podem ser refeitas
+// em alguns minutos. Diferente de erro do sistema e de teto/crédito.
+function AvisoReceitaForaDoAr({ quantidade, className = "" }) {
+  return (
+    <div
+      className={`flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3.5 text-sm text-amber-700 ${className}`}
+      role="status"
+    >
+      <ServerCrash className="mt-0.5 h-4 w-4 shrink-0" />
+      <span>
+        A Receita Federal/PGFN está temporariamente fora do ar.{" "}
+        {quantidade > 0 && (
+          <>
+            <strong>
+              {quantidade} consulta{quantidade > 1 ? "s" : ""} de CND
+            </strong>{" "}
+            falhou por isso, não por defeito do sistema.{" "}
+          </>
+        )}
+        As consultas que falharam por indisponibilidade da fonte podem ser refeitas em alguns
+        minutos.
       </span>
     </div>
   );

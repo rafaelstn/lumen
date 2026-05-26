@@ -259,9 +259,16 @@ export async function apagarAnalise(id) {
 // "INFOSIMPLES_TOKEN ausente" quando o token não está configurado.
 
 // Due diligence em lote: avalia uma lista de CNPJs e devolve o ranking
-// (pior score primeiro). { resultados, avaliados, teto_atingido }.
-export async function dueDiligence(cnpjs) {
-  const { data } = await api.post("/modulo02/due-diligence", { cnpjs });
+// (pior score primeiro). { resultados, avaliados, teto_atingido, incluiu_cnd,
+// origem_indisponivel }. incluir_cnd controla se a consulta de regularidade
+// fiscal (CND) entra na avaliação: com CND o score é completo e mais caro; sem
+// CND o score é parcial (sem o componente de regularidade) e mais barato, e não
+// depende da Receita Federal/PGFN estar no ar.
+export async function dueDiligence({ cnpjs, incluirCnd = true } = {}) {
+  const { data } = await api.post("/modulo02/due-diligence", {
+    cnpjs,
+    incluir_cnd: incluirCnd,
+  });
   return data;
 }
 
