@@ -161,6 +161,17 @@ export default function Modulo01() {
       setErroCnd(null);
       setProgresso((p) => p ?? { status: "em_andamento", percentual: 0, total: null, consultados: 0, falhas: 0 });
     },
+    onSuccess: (data) => {
+      // Confirma o estado com o total que o backend devolveu, garantindo "em_andamento"
+      // mesmo que o primeiro tick do polling tenha visto "nao_iniciado" (race do disparo).
+      setProgresso((p) => ({
+        status: "em_andamento",
+        percentual: p?.percentual ?? 0,
+        total: data?.total ?? p?.total ?? null,
+        consultados: p?.consultados ?? 0,
+        falhas: p?.falhas ?? 0,
+      }));
+    },
     onError: (e) => {
       // 409 = já existe uma CND em andamento no servidor. Não é erro: ativa a barra
       // e o polling em vez de mostrar mensagem vermelha.
@@ -219,6 +230,9 @@ export default function Modulo01() {
     async function tick() {
       try {
         const p = await consultarProgresso(resultado.job_id);
+        // Race do disparo: o POST que inicia a CND pode ainda estar em voo no primeiro
+        // tick; ignorar "nao_iniciado" evita resetar a barra ao botão inicial.
+        if (p.status === "nao_iniciado") return;
         setProgresso(p);
         if (p.status === "concluido") {
           pararPolling();
@@ -248,6 +262,8 @@ export default function Modulo01() {
     async function tick() {
       try {
         const p = await consultarProgressoEnriquecimento(resultado.job_id);
+        // Mesma race do disparo: ignora "nao_iniciado" pra não resetar a barra.
+        if (p.status === "nao_iniciado") return;
         setProgressoEnriquecimento(p);
         if (p.status === "concluido") {
           pararPollingEnriquecimento();
