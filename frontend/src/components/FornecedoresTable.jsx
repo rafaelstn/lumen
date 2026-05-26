@@ -603,49 +603,41 @@ function LinhaFornecedor({
           )}
         </td>
 
-        {/* CND — chip + botão de detalhe expansível */}
+        {/* CND — o próprio chip de status é clicável e abre/fecha a ficha (sem botão separado). */}
         <td className="px-4 py-3 align-top">
-          <div className="flex items-start gap-2">
-            <div className="flex flex-col gap-0.5">
-              {cnd ? (
-                <>
-                  <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 ${cnd.classe}`}>
-                    {cnd.rotulo}
-                  </span>
-                  {f.cnd_ultima_consulta && (
-                    <span className="text-[0.65rem] text-slate-400">em {dataCurta(f.cnd_ultima_consulta)}</span>
-                  )}
-                </>
-              ) : cndCache ? (
-                <>
-                  <span className={`inline-block rounded-md border px-2 py-0.5 text-xs font-500 opacity-70 ${cndCache.classe}`}>
-                    {cndCache.rotulo}
-                  </span>
-                  <span className="text-[0.65rem] text-slate-400">consultada em {dataCurta(f.cnd_ultima_consulta)}</span>
-                </>
-              ) : (
-                <span className="text-xs text-slate-300">—</span>
-              )}
-            </div>
-            {temFicha && (
+          {cnd || cndCache ? (() => {
+            const meta = cnd ?? cndCache;
+            const dataLabel = cnd
+              ? (f.cnd_ultima_consulta ? `em ${dataCurta(f.cnd_ultima_consulta)}` : null)
+              : `consultada em ${dataCurta(f.cnd_ultima_consulta)}`;
+            const conteudo = (
+              <>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-500 ${meta.classe}${cnd ? "" : " opacity-70"}`}
+                >
+                  {meta.rotulo}
+                  {temFicha && (expandido ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />)}
+                </span>
+                {dataLabel && <span className="text-[0.65rem] text-slate-400">{dataLabel}</span>}
+              </>
+            );
+            return temFicha ? (
               <button
                 type="button"
                 onClick={onToggleDetalhe}
                 aria-expanded={expandido}
                 aria-label={expandido ? "Fechar detalhes da CND" : "Ver detalhes da CND"}
-                className={[
-                  "mt-0.5 inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1.5 py-0.5 text-[0.65rem] font-500 transition-colors",
-                  expandido
-                    ? "border-jade-300 bg-jade-50 text-jade-700"
-                    : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-ink-700",
-                ].join(" ")}
+                title="Ver detalhes da CND"
+                className="flex flex-col items-start gap-0.5 rounded-md text-left transition-opacity hover:opacity-75 focus:outline-none focus-visible:ring-2 focus-visible:ring-jade-300"
               >
-                <FileText className="h-3 w-3" />
-                detalhes
-                {expandido ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                {conteudo}
               </button>
-            )}
-          </div>
+            ) : (
+              <div className="flex flex-col items-start gap-0.5">{conteudo}</div>
+            );
+          })() : (
+            <span className="text-xs text-slate-300">—</span>
+          )}
         </td>
 
         {/* Risco 2027 */}

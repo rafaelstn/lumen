@@ -462,6 +462,12 @@ export default function Modulo01() {
   const cndConcluida = progresso?.status === "concluido";
   const cndRodando = progresso?.status === "em_andamento";
   const totalRiscoAlto = resultado.fornecedores.filter((f) => f.risco_2027 === "ALTO").length;
+  // Quantos fornecedores AINDA serão consultados (e cobrados): tem CNPJ e não tem resultado
+  // válido (sem status ou status FALHA). Espelha _precisa_consultar do backend, para o número
+  // e o custo do card não ficarem no total cheio depois que alguns já voltaram negativa/positiva.
+  const cndPorConsultar = resultado.fornecedores.filter(
+    (f) => f.cnpj && (!f.status_cnd || f.status_cnd === "FALHA")
+  ).length;
   const impactoTotal = resultado.fornecedores.reduce(
     (s, f) => s + (Number(f.impacto_financeiro_anual) || 0),
     0
@@ -507,7 +513,7 @@ export default function Modulo01() {
           erroCnd={erroCnd}
           disparando={dispararCnd.isPending}
           onDisparar={() => dispararCnd.mutate()}
-          qtdComCnpj={r.cnpj_casados}
+          qtdComCnpj={cndPorConsultar}
           custoCndCent={custos.cndCent}
         />
       </div>
@@ -642,7 +648,7 @@ function BlocoCnd({ progresso, cndRodando, cndConcluida, erroCnd, disparando, on
             </p>
             <p className="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-xs text-slate-500">
               <Coins className="h-3.5 w-3.5 text-amber-500" />
-              Consulta paga · {numero(qtdComCnpj || 0)} com CNPJ ≈{" "}
+              Consulta paga · {numero(qtdComCnpj || 0)} a consultar ≈{" "}
               <strong className="tnum text-ink-700">{moeda(totalCent / 100)}</strong>
             </p>
             <div className="mt-4 flex justify-center">
