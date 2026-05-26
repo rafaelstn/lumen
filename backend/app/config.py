@@ -59,11 +59,12 @@ class Settings(BaseSettings):
     cnd_retry_max: int = 2  # tentativas EXTRAS após a primeira (total de até 3 chamadas por CNPJ)
     cnd_retry_backoff_s: float = 2.0  # backoff base (exponencial: base * 2**tentativa) entre tentativas
     cnd_retry_backoff_teto_s: float = 15.0  # teto de espera por tentativa (não travar o lote)
-    # Captura o link do PDF oficial da certidão (site_receipt). Quando False (padrão), envia
-    # ignore_site_receipt=1 e a Infosimples NÃO gera o comprovante (sem custo/tempo extra de
-    # renderização). Confirmado sem custo financeiro extra (price 0.26 igual); só há tempo
-    # extra em CNPJ que falha (renderização antes de desistir). Ligado: traz o PDF oficial.
-    cnd_capturar_comprovante: bool = True
+    # Captura o link do PDF oficial da certidão (site_receipt). DESLIGADO por padrão: gerar
+    # o comprovante deixa CADA consulta mais lenta (renderização na origem), o que pesa no
+    # lote. Sem ele, envia ignore_site_receipt=1 e a consulta volta rápida, trazendo todos os
+    # demais campos (status, débitos RFB/PGFN, validade, emissão, código). O PDF, se preciso,
+    # fica para uma busca sob demanda por CNPJ no futuro. Não custa a mais; o trade-off é tempo.
+    cnd_capturar_comprovante: bool = False
 
     # Teto global diário de consultas pagas (blindagem de fatura, independe de IP).
     cnd_max_diario: int = 300

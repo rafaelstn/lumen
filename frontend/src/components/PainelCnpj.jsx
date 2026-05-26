@@ -153,9 +153,9 @@ export default function PainelCnpj({
             type="button"
             onClick={() => setConfirmando("forcar")}
             disabled={enriquecendo}
-            className="inline-flex items-center gap-1.5 rounded-lg text-xs font-500 text-amber-700 underline-offset-2 transition-colors hover:underline disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-sm font-600 text-amber-700 transition-colors hover:bg-amber-50 disabled:opacity-50"
           >
-            <RotateCcw className="h-3.5 w-3.5" />
+            <RotateCcw className="h-4 w-4" />
             Tentar de novo os {numero(jaTentados)} já pesquisados
           </button>
         </div>
@@ -254,9 +254,9 @@ function DescricaoPendentes({ carregando, detalheOk, pendentes, novos, jaTentado
   if (detalheOk && semNovos) {
     return (
       <>
-        Os <strong className="tnum font-600">{numero(jaTentados)}</strong> fornecedores pendentes já foram pesquisados antes
-        e não foram encontrados, então não serão buscados de novo (para não gastar crédito à toa). Se você subiu um arquivo
-        novo, use "Tentar de novo os já pesquisados" abaixo. Você também pode corrigir o CNPJ manualmente na tabela.
+        Os <strong className="tnum font-600">{numero(jaTentados)}</strong> fornecedores pendentes já foram pesquisados e não
+        foram encontrados na base, então não serão buscados de novo automaticamente. Se você subiu um arquivo novo, use o
+        botão "Tentar de novo" abaixo. Você também pode corrigir o CNPJ manualmente na tabela.
       </>
     );
   }
