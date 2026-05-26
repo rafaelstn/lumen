@@ -64,3 +64,30 @@ async def test_falha_comum_nao_conta_como_origem_fora(monkeypatch):
     assert prog["falhas"] == 1
     assert prog["origem_indisponivel"] == 0
     store.remover(job_id)
+
+
+async def test_cobradas_conta_billable_inclusive_falha(monkeypatch):
+    # O contador de custo (cobradas) segue o billable: sucesso cobra, falha 611 cobra,
+    # falha sem cobrança (615) não. Audit trail reflete a fatura real, não "status != FALHA".
+    async def _fake_cnd(cnpj, client):
+        if cnpj == "11111111111111":  # sucesso, faturado
+            return {"status": cnd.NEGATIVA, "origem_fora": False, "cobrada": True}
+        if cnpj == "22222222222222":  # falha que cobra (611)
+            return {"status": cnd.FALHA, "origem_fora": True, "cobrada": True}
+        return {"status": cnd.FALHA, "origem_fora": True, "cobrada": False}  # falha não faturada
+
+    monkeypatch.setattr(cnd, "consultar_cnd", _fake_cnd)
+
+    job_id = _job_com([
+        {"cod_forn": "0001", "cnpj": "11111111111111", "nome_forn": "A"},
+        {"cod_forn": "0002", "cnpj": "22222222222222", "nome_forn": "B"},
+        {"cod_forn": "0003", "cnpj": "33333333333333", "nome_forn": "C"},
+    ])
+    alvos = [("0001", "11111111111111"), ("0002", "22222222222222"), ("0003", "33333333333333")]
+    await cnd._processar(job_id, alvos, total=3)
+
+    prog = store.obter(job_id)["cnd_progresso"]
+    assert prog["consultados"] == 3
+    assert prog["falhas"] == 2
+    assert prog["cobradas"] == 2  # 1 sucesso + 1 falha-611; a falha não faturada não conta
+    store.remover(job_id)

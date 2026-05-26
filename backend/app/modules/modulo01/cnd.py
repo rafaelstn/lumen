@@ -111,15 +111,20 @@ async def _consultar_cnd_uma_vez(cnpj: str, client: httpx.AsyncClient) -> dict:
         return {
             **base, "status": FALHA, "descricao": "Tempo de resposta excedido na fonte.",
             "cnd_falha_motivo": "Tempo de resposta excedido na consulta à Receita/PGFN.",
-            "_transitoria": True,
+            "_transitoria": True, "cobrada": False,  # sem resposta da origem: não há cobrança
         }
     except (httpx.HTTPError, ValueError) as exc:
         logger.warning("CND falha de rede cnpj=%s: %s", _mascara_cnpj(so_digitos), exc)
         return {
             **base, "status": FALHA, "descricao": "Falha de comunicação com a fonte.",
             "cnd_falha_motivo": "Falha de comunicação com a fonte de consulta.",
-            "_transitoria": True,
+            "_transitoria": True, "cobrada": False,  # sem resposta da origem: não há cobrança
         }
+
+    # Cobrança autoritativa: a própria Infosimples informa se a requisição foi faturada
+    # (header.billable). Vários codes de FALHA COBRAM (611/612/606/607/608/619/620), então
+    # não dá para contar custo por "deu certo": usamos este flag para o audit trail.
+    cobrada = bool((body.get("header") or {}).get("billable"))
 
     code = body.get("code")
     if code != 200 or not body.get("data"):
@@ -127,21 +132,22 @@ async def _consultar_cnd_uma_vez(cnpj: str, client: httpx.AsyncClient) -> dict:
         transitoria = code in _CODES_TRANSITORIOS
         origem_fora = code in _CODES_ORIGEM_FORA
         logger.info(
-            "CND sem resultado cnpj=%s code=%s transitoria=%s origem_fora=%s",
-            _mascara_cnpj(so_digitos), code, transitoria, origem_fora,
+            "CND sem resultado cnpj=%s code=%s transitoria=%s origem_fora=%s cobrada=%s",
+            _mascara_cnpj(so_digitos), code, transitoria, origem_fora, cobrada,
         )
         return {
             **base, "status": FALHA, "descricao": motivo,
             "cnd_falha_motivo": motivo, "_transitoria": transitoria,
-            "_origem_fora": origem_fora,
+            "_origem_fora": origem_fora, "cobrada": cobrada,
         }
 
     item = body["data"][0]
     status = _mapear_status(item)
-    logger.info("CND cnpj=%s status=%s", _mascara_cnpj(so_digitos), status)
+    logger.info("CND cnpj=%s status=%s cobrada=%s", _mascara_cnpj(so_digitos), status, cobrada)
     return {
         **base,
         "status": status,
+        "cobrada": cobrada,
         "descricao": item.get("descricao") or item.get("situacao") or "",
         # Campos completos da certidão (alimentam o dashboard e o relatório).
         "cnd_tipo": item.get("certidao"),
@@ -220,6 +226,9 @@ def iniciar_consulta_job(job_id: str, limite: int) -> dict:
             "total_com_cnpj": len(com_cnpj),
             "consultados": 0,
             "falhas": 0,
+            # Quantas consultas a Infosimples efetivamente FATUROU (header.billable). Inclui
+            # falhas que cobram (611/612/606...). É o número usado no audit trail de custo.
+            "cobradas": 0,
             # Quantas falhas foram por a FONTE (Receita/PGFN) estar fora do ar (code 615 e
             # afins). > 0 sinaliza ao frontend "a Receita está temporariamente fora do ar"
             # em vez de "defeito do sistema".
@@ -284,7 +293,10 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
                     "total": total, "consultados": 0, "falhas": 0, "origem_indisponivel": 0,
                 }
                 prog.setdefault("origem_indisponivel", 0)
+                prog.setdefault("cobradas", 0)
                 prog["consultados"] = prog.get("consultados", 0) + 1
+                if r.get("cobrada"):
+                    prog["cobradas"] += 1
                 if r["status"] == FALHA:
                     prog["falhas"] = prog.get("falhas", 0) + 1
                     if r.get("origem_fora"):
@@ -323,8 +335,9 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
         prog["status"] = "concluido"
         prog["percentual"] = 100.0
         job["cnd_progresso"] = prog
-        # CNDs concluídas (com crédito) = consultados - falhas. FALHA não consome crédito.
-        capturado["concluidas"] = max(0, prog.get("consultados", 0) - prog.get("falhas", 0))
+        # Custo real = consultas FATURADAS pela Infosimples (header.billable), não "consultados
+        # - falhas": várias falhas (611/612...) cobram. Usar o billable evita subestimar a fatura.
+        capturado["cobradas"] = prog.get("cobradas", 0)
 
     if not store.mutar(job_id, finalizar):
         logger.warning("CND: job %s expirou antes de aplicar o risco 2027.", job_id)
@@ -340,7 +353,7 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
     try:
         await consumo_repo.registrar_cnd(
             escritorio_id=escritorio_id, modulo="modulo01",
-            operacao="cnd_lote", consultas_concluidas=capturado.get("concluidas", 0),
+            operacao="cnd_lote", consultas_cobradas=capturado.get("cobradas", 0),
             contexto=f"job {job_id[:8]}",
         )
     except Exception:

@@ -52,7 +52,7 @@ async def _associar(escritorio_id: str, cnpjs: list[str]) -> None:
 
 async def _registrar_consumo(
     escritorio: str, modulo: str, operacao: str,
-    consultas_cnpj: int, cnds_concluidas: int, contexto: str | None,
+    consultas_cnpj: int, cnds_cobradas: int, contexto: str | None,
 ) -> None:
     """Grava o audit trail do consumo (CNPJ + CND). Resiliente: nunca derruba a operação.
 
@@ -66,7 +66,7 @@ async def _registrar_consumo(
         )
         await consumo_repo.registrar_cnd(
             escritorio_id=escritorio, modulo=modulo, operacao=operacao,
-            consultas_concluidas=cnds_concluidas, contexto=contexto,
+            consultas_cobradas=cnds_cobradas, contexto=contexto,
         )
     except Exception:
         import logging
@@ -99,7 +99,7 @@ async def due_diligence(
     limite_taxa_atingido = False
     creditos_esgotados = False
     consultas_cnpj = 0          # nº de consultas ao CNPJá (2 créditos cada, estimado)
-    cnds_concluidas = 0         # nº de CNDs concluídas (1 crédito cada; FALHA não conta)
+    cnds_cobradas = 0           # nº de CNDs FATURADAS pela Infosimples (billable; inclui 611/612)
     origem_indisponivel = 0     # nº de CNDs que falharam por a Receita/PGFN estar fora do ar
     throttle = cnpj_lookup.novo_throttle()
     async with httpx.AsyncClient() as client:
@@ -134,17 +134,17 @@ async def due_diligence(
                 creditos_esgotados = True
                 break
             consultas_cnpj += 1
-            if r.get("status_cnd") and r["status_cnd"] != "FALHA":
-                cnds_concluidas += 1
+            if r.get("cobrada"):
+                cnds_cobradas += 1
             if r.get("origem_fora"):
                 origem_indisponivel += 1
             resultados.append(r)
 
     # Associa ao escritório os CNPJs avaliados (visão isolada do cache global de fornecedores).
     await _associar(ctx.escritorio_id, [r.get("cnpj") for r in resultados if r.get("cnpj")])
-    # Audit trail: sem CND, só consome/registra o cadastro (cnpj); cnds_concluidas fica 0.
+    # Audit trail: sem CND, só consome/registra o cadastro (cnpj); cnds_cobradas fica 0.
     await _registrar_consumo(
-        ctx.escritorio_id, "modulo02", "due_diligence", consultas_cnpj, cnds_concluidas,
+        ctx.escritorio_id, "modulo02", "due_diligence", consultas_cnpj, cnds_cobradas,
         contexto=f"{len(resultados)} cnpj(s){'' if incluir_cnd else ' (sem cnd)'}",
     )
     resultados.sort(key=lambda r: r["score"])  # pior score primeiro (maior risco)

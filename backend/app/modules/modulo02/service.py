@@ -74,6 +74,9 @@ async def avaliar_cnpj(
         # Sinaliza que a CND falhou por a FONTE (Receita/PGFN) estar fora do ar. False quando
         # não houve consulta de CND (incluir_cnd=False) ou quando a fonte respondeu normal.
         "origem_fora": bool(cnd_res.get("origem_fora")) if cnd_res is not None else False,
+        # Requisição faturada pela Infosimples (header.billable). Inclui falhas que cobram (611...).
+        # É o que alimenta o audit trail de custo, não "status != FALHA".
+        "cobrada": bool(cnd_res.get("cobrada")) if cnd_res is not None else False,
         "score": s["score"],
         "faixa": s["faixa"],
         "componentes": s["componentes"],
@@ -89,7 +92,7 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
     monitorados = await repo.listar_monitorados(session, escritorio_id)
     reavaliados, alertas, teto_atingido = 0, 0, False
     limite_taxa_atingido = False
-    consultas_cnpj, cnds_concluidas = 0, 0
+    consultas_cnpj, cnds_cobradas = 0, 0
 
     throttle = cnpj_lookup.novo_throttle()
     async with httpx.AsyncClient() as client:
@@ -117,8 +120,8 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
             await repo.upsert_monitorado(session, escritorio_id, avaliacao)
             reavaliados += 1
             consultas_cnpj += 1
-            if avaliacao.get("status_cnd") and avaliacao["status_cnd"] != "FALHA":
-                cnds_concluidas += 1
+            if avaliacao.get("cobrada"):
+                cnds_cobradas += 1
 
             if status_anterior and status_anterior != avaliacao["status_cnd"]:
                 await repo.criar_alerta(
@@ -141,7 +144,7 @@ async def reavaliar_carteira(session, escritorio_id: str) -> dict:
         )
         await consumo_repo.registrar_cnd(
             escritorio_id=escritorio_id, modulo="modulo02", operacao="reavaliacao",
-            consultas_concluidas=cnds_concluidas, contexto=f"{reavaliados} monitorado(s)",
+            consultas_cobradas=cnds_cobradas, contexto=f"{reavaliados} monitorado(s)",
         )
     except Exception:
         import logging

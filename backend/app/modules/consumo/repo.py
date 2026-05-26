@@ -114,23 +114,25 @@ async def registrar_cnd(
     escritorio_id: str,
     modulo: str,
     operacao: str,
-    consultas_concluidas: int,
+    consultas_cobradas: int,
     contexto: str | None = None,
     session: AsyncSession | None = None,
 ) -> ConsultaLog | None:
-    """Atalho: registra `consultas_concluidas` CNDs (1 crédito cada). FALHA não conta (0 crédito).
+    """Atalho: registra `consultas_cobradas` CNDs (1 crédito cada).
 
-    Não grava nada se consultas_concluidas <= 0.
+    Cobradas = requisições que a Infosimples FATUROU (header.billable), o que inclui falhas
+    como 611/612 (certidão incompleta/sem dados na origem). Antes contávamos só as concluídas
+    (status != FALHA), o que subestimava a fatura. Não grava nada se consultas_cobradas <= 0.
     """
-    if consultas_concluidas <= 0:
+    if consultas_cobradas <= 0:
         return None
     return await registrar_consulta(
         escritorio_id=escritorio_id,
         modulo=modulo,
         servico=SERVICO_CND,
         operacao=operacao,
-        quantidade=consultas_concluidas,
-        creditos_consumidos=consultas_concluidas * pricing.CREDITOS_POR_CONSULTA_CND,
+        quantidade=consultas_cobradas,
+        creditos_consumidos=consultas_cobradas * pricing.CREDITOS_POR_CONSULTA_CND,
         consumo_estimado=True,
         contexto=contexto,
         session=session,

@@ -47,10 +47,10 @@ async def test_registrar_cnpj_zero_consultas_nao_grava(session):
     assert total == 0
 
 
-async def test_registrar_cnd_falha_nao_consome(session):
-    # cnd_lote com 0 concluídas (todas FALHA): nada é gravado.
+async def test_registrar_cnd_sem_cobranca_nao_grava(session):
+    # cnd_lote com 0 cobradas (nenhuma requisição faturada): nada é gravado.
     log = await repo.registrar_cnd(
-        escritorio_id=ESC, modulo="modulo01", operacao="cnd_lote", consultas_concluidas=0,
+        escritorio_id=ESC, modulo="modulo01", operacao="cnd_lote", consultas_cobradas=0,
     )
     assert log is None
 

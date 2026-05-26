@@ -229,3 +229,37 @@ async def test_606_parametro_que_cobra_nao_retenta():
     r = await cnd.consultar_cnd("51260859000170", client)
     assert r["status"] == cnd.FALHA
     assert client.chamadas == 1
+
+
+async def test_cobrada_reflete_billable_no_sucesso():
+    # header.billable=True numa consulta com sucesso -> cobrada True.
+    client = _FakeClient({
+        "code": 200, "header": {"billable": True},
+        "data": [{"conseguiu_emitir_certidao_negativa": True}],
+    })
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.NEGATIVA
+    assert r["cobrada"] is True
+
+
+async def test_cobrada_reflete_billable_na_falha_611():
+    # 611 (certidão incompleta na origem) COBRA: billable=True -> cobrada True mesmo em FALHA.
+    client = _FakeClient({
+        "code": 611, "header": {"billable": True},
+        "code_message": "Os dados estão incompletos no site ou aplicativo de origem...", "data": [],
+    })
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.FALHA
+    assert r["cobrada"] is True
+    assert r["origem_fora"] is True
+
+
+async def test_nao_cobrada_quando_billable_falso():
+    # 615 (origem indisponível) NÃO cobra: billable=False -> cobrada False.
+    client = _FakeClient({
+        "code": 615, "header": {"billable": False},
+        "code_message": "Origem indisponível.", "data": [],
+    })
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.FALHA
+    assert r["cobrada"] is False
