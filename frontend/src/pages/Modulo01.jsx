@@ -671,7 +671,7 @@ function AvisoReceitaForaDoAr({ quantidade, className = "" }) {
     >
       <ServerCrash className="mt-0.5 h-4 w-4 shrink-0" />
       <span>
-        A Receita Federal/PGFN está temporariamente fora do ar.{" "}
+        A Receita Federal/PGFN está instável (fora do ar ou devolvendo certidão incompleta).{" "}
         <strong>
           {quantidade} consulta{quantidade > 1 ? "s" : ""}
         </strong>{" "}

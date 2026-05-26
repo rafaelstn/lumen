@@ -584,7 +584,7 @@ function CardFornecedor({ f, semCnd = false }) {
             {f.origem_fora && (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-500 text-amber-700">
                 <ServerCrash className="h-3 w-3" />
-                Receita fora do ar
+                Receita instável
               </span>
             )}
             {f.situacao_cadastral && (
@@ -951,7 +951,7 @@ function AvisoReceitaForaDoAr({ quantidade, className = "" }) {
     >
       <ServerCrash className="mt-0.5 h-4 w-4 shrink-0" />
       <span>
-        A Receita Federal/PGFN está temporariamente fora do ar.{" "}
+        A Receita Federal/PGFN está instável (fora do ar ou devolvendo certidão incompleta).{" "}
         {quantidade > 0 && (
           <>
             <strong>

@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     cnd_provider: str = "infosimples"
     infosimples_base_url: str = "https://api.infosimples.com/api/v2/consultas"
     infosimples_token: str = ""
+    # Serviço (endpoint) da CND federal na Infosimples. Trocável por env para testar a versão
+    # "nova" (receita-federal/pgfn/nova) sem novo deploy. ATENÇÃO: validar os campos de resposta
+    # do endpoint novo (nomes podem diferir) antes de fixar, ou o parsing de status quebra.
+    cnd_servico: str = "receita-federal/pgfn"
     infosimples_timeout: int = 120  # timeout da consulta na origem (Infosimples), em segundos
     cnd_limite_padrao: int = 20  # teto de fornecedores por chamada (controle de custo)
     cnd_limite_max: int = 200  # clamp do parâmetro 'limite' (anti-abuso)

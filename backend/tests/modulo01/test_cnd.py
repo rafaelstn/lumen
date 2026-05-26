@@ -119,11 +119,11 @@ async def test_consultar_cnd_captura_todos_os_campos():
 
 
 async def test_consultar_cnd_code_erro_captura_motivo():
-    client = _FakeClient({"code": 605, "code_message": "CNPJ não encontrado na base.", "data": []})
+    # 620 = erro da origem que provavelmente não muda: definitivo, uma única chamada.
+    client = _FakeClient({"code": 620, "code_message": "Erro de negócio na origem.", "data": []})
     r = await cnd.consultar_cnd("51260859000170", client)
     assert r["status"] == cnd.FALHA
-    assert r["cnd_falha_motivo"] == "CNPJ não encontrado na base."
-    # Code definitivo (605): uma única chamada, sem retry.
+    assert r["cnd_falha_motivo"] == "Erro de negócio na origem."
     assert client.chamadas == 1
 
 
@@ -145,9 +145,9 @@ async def test_consultar_cnd_excecao_de_rede_vira_falha_com_motivo():
 
 
 async def test_retry_transitoria_vira_sucesso():
-    # Primeira chamada 429 (transitória), segunda 200 negativa.
+    # Primeira chamada 615 (origem indisponível, transitória), segunda 200 negativa.
     client = _SequenciaClient([
-        {"code": 429, "code_message": "Limite de requisições.", "data": []},
+        {"code": 615, "code_message": "Origem indisponível.", "data": []},
         {"code": 200, "data": [{"conseguiu_emitir_certidao_negativa": True}]},
     ])
     r = await cnd.consultar_cnd("51260859000170", client)
@@ -156,16 +156,16 @@ async def test_retry_transitoria_vira_sucesso():
 
 
 async def test_retry_definitiva_nao_retenta():
-    # Code 605 (definitivo): não re-tenta mesmo com retry habilitado.
-    client = _FakeClient({"code": 605, "code_message": "CNPJ inválido.", "data": []})
+    # 607 (parâmetro inválido): erro nosso e definitivo — não re-tenta mesmo com retry habilitado.
+    client = _FakeClient({"code": 607, "code_message": "Parâmetro inválido.", "data": []})
     r = await cnd.consultar_cnd("51260859000170", client)
     assert r["status"] == cnd.FALHA
     assert client.chamadas == 1
 
 
 async def test_retry_transitoria_nao_estoura_o_teto():
-    # 5xx em todas as chamadas: re-tenta, mas para no teto e devolve FALHA.
-    client = _FakeClient({"code": 500, "code_message": "Instabilidade na fonte.", "data": []})
+    # 618 (origem sobrecarregada) em todas as chamadas: re-tenta, mas para no teto e devolve FALHA.
+    client = _FakeClient({"code": 618, "code_message": "Origem sobrecarregada.", "data": []})
     r = await cnd.consultar_cnd("51260859000170", client)
     assert r["status"] == cnd.FALHA
     assert client.chamadas == 1 + settings.cnd_retry_max
@@ -186,8 +186,8 @@ async def test_code_615_marca_origem_fora():
 
 
 async def test_falha_comum_nao_marca_origem_fora():
-    # 605 (CNPJ não encontrado) é defeito de negócio, não fonte fora do ar.
-    client = _FakeClient({"code": 605, "code_message": "CNPJ não encontrado.", "data": []})
+    # 607 (parâmetro inválido) é erro nosso, não a fonte fora do ar.
+    client = _FakeClient({"code": 607, "code_message": "Parâmetro inválido.", "data": []})
     r = await cnd.consultar_cnd("51260859000170", client)
     assert r["status"] == cnd.FALHA
     assert r["origem_fora"] is False
@@ -198,3 +198,34 @@ async def test_sucesso_nao_marca_origem_fora():
     r = await cnd.consultar_cnd("51260859000170", client)
     assert r["status"] == cnd.NEGATIVA
     assert r["origem_fora"] is False
+
+
+async def test_605_timeout_e_retentavel():
+    # 605 = timeout no limite. A doc orienta re-tentar (não cobra): re-tenta até o teto.
+    # Era o bug: o código antigo tratava 605 como definitivo e não re-tentava.
+    client = _FakeClient({"code": 605, "code_message": "Timeout no limite.", "data": []})
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.FALHA
+    assert client.chamadas == 1 + settings.cnd_retry_max
+
+
+async def test_611_origem_incompleta_marca_origem_fora_sem_retentar():
+    # 611 = certidão incompleta na origem (Receita instável). COBRA, então NÃO martela
+    # (uma única chamada), mas é instabilidade da origem -> origem_fora True para a UI avisar.
+    client = _FakeClient({
+        "code": 611,
+        "code_message": "Os dados estão incompletos no site ou aplicativo de origem...",
+        "data": [],
+    })
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.FALHA
+    assert r["origem_fora"] is True
+    assert client.chamadas == 1
+
+
+async def test_606_parametro_que_cobra_nao_retenta():
+    # 606 = parâmetro obrigatório faltando: erro nosso e COBRA. Não re-tenta (não inflar fatura).
+    client = _FakeClient({"code": 606, "code_message": "Parâmetro ausente.", "data": []})
+    r = await cnd.consultar_cnd("51260859000170", client)
+    assert r["status"] == cnd.FALHA
+    assert client.chamadas == 1

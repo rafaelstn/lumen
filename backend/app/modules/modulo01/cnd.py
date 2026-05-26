@@ -45,19 +45,21 @@ POSITIVA_EFEITO_NEGATIVA = "POSITIVA_EFEITO_NEGATIVA"   # débito parcelado/susp
 POSITIVA = "POSITIVA"                                   # débito ativo, irregular
 FALHA = "FALHA"                                         # não foi possível consultar/indeterminado
 
-_SERVICO = "receita-federal/pgfn"
+# Classificação dos códigos de resposta da Infosimples (tabela oficial da doc da API).
+# RE-TENTÁVEIS: falhas transitórias que a doc orienta repetir E que NÃO são cobradas — re-tentar
+# tem chance de sucesso e é de graça. Ficam DE FORA: codes que cobram (re-tentar inflaria a fatura
+# à toa) e erros de parâmetro/token nossos (nunca resolvem sozinhos).
+#   600 erro inesperado | 605 timeout no limite | 609 tentativas à origem excedidas |
+#   610 falha de captcha | 613 origem bloqueou ("tente de novo") | 614 erro inesperado na origem |
+#   615 origem indisponível | 617 sobrecarga do serviço | 618 origem sobrecarregada.
+# (Falha de rede/timeout HTTP não tem code: já é tratada como transitória no except, abaixo.)
+_CODES_TRANSITORIOS = {600, 605, 609, 610, 613, 614, 615, 617, 618}
 
-# Codes de erro da Infosimples considerados TRANSITÓRIOS (vale re-tentar): timeout na origem,
-# instabilidade do site consultado, limite de requisições. Qualquer outro code != 200 é tratado
-# como definitivo (CNPJ inválido, parâmetro errado, certidão indisponível por regra), sem retry.
-# Fonte: tabela de códigos da Infosimples (6xx = erro de consulta; 5xx/429 = infra/limite).
-_CODES_TRANSITORIOS = {429, 500, 502, 503, 504, 600, 602, 606, 607, 608, 612, 613, 615}
-
-# Subconjunto que indica especificamente que a FONTE (Receita Federal/PGFN) está fora do ar,
-# não defeito nosso nem timeout de rede genérico. 615 = "O site/aplicativo de origem parece
-# estar indisponível". Os demais são instabilidade declarada da origem pela Infosimples.
-# Serve para avisar o usuário "a Receita está temporariamente fora do ar" (vs. erro do sistema).
-_CODES_ORIGEM_FORA = {615, 606, 607, 608, 612, 613}
+# Codes que indicam falha da FONTE (Receita Federal/PGFN), não defeito nosso. A UI usa isso para
+# avisar "a Receita está instável, tente novamente em alguns minutos" em vez de "erro do sistema".
+# Inclui o 611 (certidão incompleta na origem) e o 612 (origem não retornou dados): esses COBRAM,
+# então ficam fora dos re-tentáveis (não martelar gerando fatura), mas SÃO instabilidade da origem.
+_CODES_ORIGEM_FORA = {611, 612, 613, 614, 615, 617, 618}
 
 
 def _mascara_cnpj(cnpj: str) -> str:
@@ -99,7 +101,7 @@ async def _consultar_cnd_uma_vez(cnpj: str, client: httpx.AsyncClient) -> dict:
     base = {"cnpj": so_digitos, "data_consulta": datetime.now(timezone.utc).isoformat()}
     try:
         resp = await client.post(
-            f"{settings.infosimples_base_url}/{_SERVICO}",
+            f"{settings.infosimples_base_url}/{settings.cnd_servico}",
             data=payload,
             timeout=settings.infosimples_timeout + 30,
         )
@@ -272,6 +274,10 @@ async def _processar(job_id: str, alvos: list[tuple[str, str]], total: int) -> N
                         f["cnd_debitos_pgfn"] = r.get("cnd_debitos_pgfn")
                         f["cnd_comprovante_url"] = r.get("cnd_comprovante_url")
                         f["cnd_falha_motivo"] = r.get("cnd_falha_motivo")
+                        # Flag autoritativo (pela tabela de codes) de que a falha é da FONTE
+                        # (Receita/PGFN), não nossa. O frontend usa isso em vez de adivinhar
+                        # pelo texto do motivo. Persiste no histórico junto com o fornecedor.
+                        f["cnd_origem_fora"] = bool(r.get("origem_fora"))
                         cap["razao_social"] = f.get("nome_forn")
                         break
                 prog = job.get("cnd_progresso") or {

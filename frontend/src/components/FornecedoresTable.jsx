@@ -717,14 +717,17 @@ function FichaCnd({ f }) {
   const cnd = statusCndMeta(f.status_cnd) ?? statusCndMeta(f.cnd_status_cache);
   const ehFalha = f.status_cnd === "FALHA";
   const validade = validadeCnd(f.cnd_validade);
-  // Reforço visual: quando o motivo da falha indica que a fonte oficial está
-  // fora do ar (Receita Federal/PGFN), deixa explícito que é indisponibilidade
-  // da origem, não defeito do sistema nem débito do fornecedor.
+  // Reforço visual: quando a falha é da fonte oficial (Receita Federal/PGFN) e não
+  // defeito do sistema nem débito do fornecedor. Usa o flag autoritativo do backend
+  // (cnd_origem_fora, classificado pela tabela de codes da Infosimples); cai no regex
+  // do motivo só para análises antigas salvas antes do flag existir.
   const origemFora =
     ehFalha &&
-    /receita|pgfn|fora do ar|indispon|inst[áa]vel|timeout|tempo esgotado|502|503|504/i.test(
-      f.cnd_falha_motivo || "",
-    );
+    (typeof f.cnd_origem_fora === "boolean"
+      ? f.cnd_origem_fora
+      : /receita|pgfn|fora do ar|indispon|inst[áa]vel|incompl|origem|timeout|tempo esgotado|502|503|504/i.test(
+          f.cnd_falha_motivo || "",
+        ));
 
   return (
     <div className="animate-fade-up rounded-xl border border-slate-200 bg-white p-4 shadow-panel">
@@ -758,7 +761,7 @@ function FichaCnd({ f }) {
             <div>
               <p className="text-sm font-600 text-amber-800">
                 {origemFora
-                  ? "A Receita Federal/PGFN está fora do ar"
+                  ? "A Receita Federal/PGFN está instável"
                   : "Não foi possível consultar a CND"}
               </p>
               <p className="mt-1 text-xs leading-relaxed text-amber-700">
@@ -767,7 +770,7 @@ function FichaCnd({ f }) {
               <p className="mt-1.5 flex items-center gap-1 text-xs leading-relaxed text-amber-700">
                 <RotateCcw className="h-3 w-3 shrink-0" />
                 {origemFora
-                  ? "É a fonte oficial fora do ar, não defeito do sistema nem débito do fornecedor. Tente consultar de novo em alguns minutos."
+                  ? "É instabilidade da fonte oficial (Receita Federal/PGFN), não defeito do sistema nem débito do fornecedor. Tente consultar de novo em alguns minutos."
                   : "Isto é uma falha na consulta, não significa que o fornecedor tem débito. Você pode tentar consultar de novo."}
               </p>
             </div>
