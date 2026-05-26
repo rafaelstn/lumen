@@ -20,6 +20,20 @@ http {
         add_header X-Frame-Options "DENY" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
+        # O index.html NUNCA é cacheado: ele aponta para os bundles com hash, então
+        # precisa refletir sempre o deploy mais recente (senão o navegador serve uma
+        # versão antiga do app após um novo deploy). Os assets com hash no nome (abaixo)
+        # podem ser cacheados para sempre, pois o nome muda a cada build.
+        location = /index.html {
+            add_header Cache-Control "no-cache, no-store, must-revalidate" always;
+            try_files $uri =404;
+        }
+
+        location /assets/ {
+            add_header Cache-Control "public, max-age=31536000, immutable" always;
+            try_files $uri =404;
+        }
+
         # SPA: qualquer rota cai no index.html (React Router client-side).
         location / {
             try_files $uri $uri/ /index.html;
