@@ -14,6 +14,7 @@ from datetime import datetime
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.analise import Analise
 from app.models.escritorio import Escritorio
 from app.models.fornecedor import EscritorioFornecedor, Fornecedor
@@ -36,7 +37,12 @@ async def resumo_geral(
     da Receita gravado (cadastro_atualizado_em IS NOT NULL). 'consultas_pagas' conta linhas do
     audit trail com custo > 0 (operação que efetivamente gastou crédito).
     """
-    total_escritorios = await _scalar(session, select(func.count(Escritorio.id)))
+    # O escritório default é técnico (fallback do modo anônimo), não um cliente real:
+    # fica fora da contagem e da listagem de gestão do dashboard admin.
+    total_escritorios = await _scalar(
+        session,
+        select(func.count(Escritorio.id)).where(Escritorio.id != settings.escritorio_default_id),
+    )
     total_usuarios = await _scalar(session, select(func.count(Usuario.id)))
     total_analises = await _scalar(session, select(func.count(Analise.id)))
     fornecedores_cache_global = await _scalar(session, select(func.count(Fornecedor.id)))
@@ -165,9 +171,9 @@ async def escritorios_com_metricas(session: AsyncSession) -> list[dict]:
     custo desc; empate cai na atividade mais recente. Não inclui nenhum dado pessoal.
     """
     base = await session.execute(
-        select(Escritorio.id, Escritorio.nome, Escritorio.criado_em).order_by(
-            Escritorio.criado_em.asc()
-        )
+        select(Escritorio.id, Escritorio.nome, Escritorio.criado_em)
+        .where(Escritorio.id != settings.escritorio_default_id)  # escritório técnico, fora da gestão
+        .order_by(Escritorio.criado_em.asc())
     )
     escritorios = base.all()
 
